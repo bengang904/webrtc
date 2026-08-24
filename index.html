@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
-<title>WebRTCMeeting</title>
+<title>WebRTC-Meeting</title>
 <style>
 :root{--discord-bg:#313338;--discord-sidebar:#2b2d31;--discord-panel:#111214;--discord-chat:#383a40;--discord-input:#383a40;--discord-text:#dbdee1;--discord-text-muted:#949ba4;--discord-accent:#5865f2;--discord-accent-hover:#4752c4;--discord-green:#23a55a;--discord-red:#f23f43;--discord-border:#1f2023}
 *{box-sizing:border-box}
@@ -223,78 +223,815 @@ select.mode-select{font-family:inherit;font-size:.85rem;cursor:pointer}
 </div>
 <script>
 const $=id=>document.getElementById(id);
-const statusEl=$('status'),initModal=$('initModal'),modalHostBtn=$('modalHostBtn'),modalJoinBtn=$('modalJoinBtn'),
-modalHostSection=$('modalHostSection'),modalJoinSection=$('modalJoinSection'),modalHostSdp=$('modalHostSdp'),
-modalCopyHost=$('modalCopyHost'),modalHostAnswer=$('modalHostAnswer'),modalApplyAnswer=$('modalApplyAnswer'),
-modalJoinOffer=$('modalJoinOffer'),modalApplyOffer=$('modalApplyOffer'),modalJoinAnswer=$('modalJoinAnswer'),
-modalCopyJoin=$('modalCopyJoin'),modalFinishJoin=$('modalFinishJoin'),micBtn=$('micBtn'),soundBtn=$('soundBtn'),
-camBtn=$('camBtn'),screenBtn=$('screenBtn'),chatMessages=$('chatMessages'),chatInput=$('chatInput'),
-sendChatBtn=$('sendChatBtn'),localCamVideo=$('localCamVideo'),localScreenVideo=$('localScreenVideo'),
-remoteCamVideo=$('remoteCamVideo'),remoteScreenVideo=$('remoteScreenVideo'),localCamOverlay=$('localCamOverlay'),
-localScreenOverlay=$('localScreenOverlay'),remoteCamOverlay=$('remoteCamOverlay'),remoteScreenOverlay=$('remoteScreenOverlay'),
-logEl=$('log'),toggleControlsBtn=$('toggleControlsBtn'),controlBar=$('controlBar'),toggleSidebarBtn=$('toggleSidebarBtn'),
-sidebarPanel=$('sidebarPanel'),videoGrid=$('videoGrid'),connMode=$('connMode'),signalingSection=$('signalingSection'),
-manualSection=$('manualSection'),signalingUrl=$('signalingUrl'),sigConnectBtn=$('sigConnectBtn'),roomInput=$('roomInput'),
-roomLabel=$('roomLabel'),waitingArea=$('waitingArea'),waitingRoomCode=$('waitingRoomCode'),
-fileInput=$('fileInput'),fileBtn=$('fileBtn');
-let pc,dataChannel,ws,role='join',currentRoom='',micEnabled=false,soundEnabled=true,camEnabled=false,screenEnabled=false,
-micTrack=null,camTrack=null,screenTrack=null,screenAudioTrack=null,audioTransceiver=null,videoTransceiver1=null,videoTransceiver2=null,
-remoteVideoCount=0,controlsExpanded=true,offerHandled=false,returningToWizard=false;
-const ICE_SERVERS={iceServers:[{urls:'stun:stun.l.google.com:19302'}]},STORAGE_KEY='webrtc_signaling_url';
+const statusEl=$('status'),initModal=$('initModal'),modalHostBtn=$('modalHostBtn'),modalJoinBtn=$('modalJoinBtn'),modalHostSection=$('modalHostSection'),modalJoinSection=$('modalJoinSection'),modalHostSdp=$('modalHostSdp'),modalCopyHost=$('modalCopyHost'),modalHostAnswer=$('modalHostAnswer'),modalApplyAnswer=$('modalApplyAnswer'),modalJoinOffer=$('modalJoinOffer'),modalApplyOffer=$('modalApplyOffer'),modalJoinAnswer=$('modalJoinAnswer'),modalCopyJoin=$('modalCopyJoin'),modalFinishJoin=$('modalFinishJoin'),micBtn=$('micBtn'),soundBtn=$('soundBtn'),camBtn=$('camBtn'),screenBtn=$('screenBtn'),chatMessages=$('chatMessages'),chatInput=$('chatInput'),sendChatBtn=$('sendChatBtn'),localCamVideo=$('localCamVideo'),localScreenVideo=$('localScreenVideo'),remoteCamVideo=$('remoteCamVideo'),remoteScreenVideo=$('remoteScreenVideo'),localCamOverlay=$('localCamOverlay'),localScreenOverlay=$('localScreenOverlay'),remoteCamOverlay=$('remoteCamOverlay'),remoteScreenOverlay=$('remoteScreenOverlay'),logEl=$('log'),toggleControlsBtn=$('toggleControlsBtn'),controlBar=$('controlBar'),toggleSidebarBtn=$('toggleSidebarBtn'),sidebarPanel=$('sidebarPanel'),videoGrid=$('videoGrid'),connMode=$('connMode'),signalingSection=$('signalingSection'),manualSection=$('manualSection'),signalingUrl=$('signalingUrl'),sigConnectBtn=$('sigConnectBtn'),roomInput=$('roomInput'),roomLabel=$('roomLabel'),waitingArea=$('waitingArea'),waitingRoomCode=$('waitingRoomCode'),fileInput=$('fileInput'),fileBtn=$('fileBtn');
+let pc,dataChannel,ws,role='join',currentRoom='',micEnabled=false,soundEnabled=true,camEnabled=false,screenEnabled=false,micTrack=null,camTrack=null,screenTrack=null,screenAudioTrack=null,audioTransceiver=null,videoTransceiver1=null,videoTransceiver2=null,remoteVideoCount=0,controlsExpanded=true,offerHandled=false,returningToWizard=false;
+let keepAliveTimer=null,dcKeepAliveTimer=null,disconnectTimer=null,iceRestartTimer=null;
+const ICE_SERVERS={iceServers:[{urls:'stun:stun.l.google.com:19302'},{urls:'stun:stun1.l.google.com:19302'}]};
+const STORAGE_KEY='webrtc_signaling_url';
 const CHUNK_SIZE=16*1024;
 const BUFFER_THRESHOLD=256*1024;
+const DISCONNECT_GRACE_MS=18000;
 const pendingFiles=new Map();
 const activeSends=new Map();
 function log(m){console.log(m);logEl.innerHTML+=`<div>[${new Date().toLocaleTimeString()}] ${m}</div>`;logEl.scrollTop=logEl.scrollHeight}
 function loadSavedUrl(){const s=localStorage.getItem(STORAGE_KEY);if(s)signalingUrl.value=s}
 function saveUrl(){const u=signalingUrl.value.trim();if(u)localStorage.setItem(STORAGE_KEY,u)}
-function updateModeUI(){const isSig=connMode.value==='signaling';signalingSection.classList.toggle('step-hidden',!isSig);manualSection.classList.toggle('step-hidden',isSig);updateRoleUI();resetPeer()}
-function updateRoleUI(){if(connMode.value!=='signaling'){role==='host'?(modalHostSection.classList.remove('step-hidden'),modalJoinSection.classList.add('step-hidden')):(modalJoinSection.classList.remove('step-hidden'),modalHostSection.classList.add('step-hidden'));return}roomLabel.textContent=role==='host'?'自定义房间号（创建）':'输入创建方的房间号（加入）';roomInput.placeholder=role==='host'?'自己输入房间号，例如 myroom01':'填写对方创建的房间号';waitingArea.classList.add('step-hidden');sigConnectBtn.disabled=false;sigConnectBtn.textContent='连接信令并开始'}
+function clearAllTimers(){
+if(keepAliveTimer){clearInterval(keepAliveTimer);keepAliveTimer=null}
+if(dcKeepAliveTimer){clearInterval(dcKeepAliveTimer);dcKeepAliveTimer=null}
+if(disconnectTimer){clearTimeout(disconnectTimer);disconnectTimer=null}
+if(iceRestartTimer){clearTimeout(iceRestartTimer);iceRestartTimer=null}
+}
+function startSignalingKeepAlive(){
+if(keepAliveTimer)clearInterval(keepAliveTimer);
+keepAliveTimer=setInterval(()=>{
+if(ws&&ws.readyState===1&&currentRoom){
+try{ws.send(JSON.stringify({type:'ping',room:currentRoom}))}catch{}
+}
+},12000);
+}
+function startDataChannelKeepAlive(){
+if(dcKeepAliveTimer)clearInterval(dcKeepAliveTimer);
+dcKeepAliveTimer=setInterval(()=>{
+if(dataChannel&&dataChannel.readyState==='open'){
+try{dataChannel.send(JSON.stringify({type:'hb',t:Date.now()}))}catch{}
+}
+},8000);
+}
+function scheduleDisconnect(reason){
+if(disconnectTimer)return;
+log(reason+'，等待恢复...');
+disconnectTimer=setTimeout(()=>{
+disconnectTimer=null;
+if(pc&&(pc.connectionState==='connected'||pc.connectionState==='connecting'))return;
+if(dataChannel&&dataChannel.readyState==='open')return;
+returnToWizard();
+},DISCONNECT_GRACE_MS);
+}
+function cancelDisconnectTimer(){
+if(disconnectTimer){clearTimeout(disconnectTimer);disconnectTimer=null}
+}
+function tryIceRestart(){
+if(!pc||typeof pc.restartIce!=='function')return;
+if(pc.connectionState!=='disconnected'&&pc.iceConnectionState!=='disconnected')return;
+try{
+pc.restartIce();
+log('已尝试 ICE 重启');
+}catch(e){log('ICE 重启失败: '+e.message)}
+}
+function updateModeUI(){
+const isSig=connMode.value==='signaling';
+signalingSection.classList.toggle('step-hidden',!isSig);
+manualSection.classList.toggle('step-hidden',isSig);
+updateRoleUI();
+resetPeer();
+}
+function updateRoleUI(){
+if(connMode.value!=='signaling'){
+role==='host'?(modalHostSection.classList.remove('step-hidden'),modalJoinSection.classList.add('step-hidden')):(modalJoinSection.classList.remove('step-hidden'),modalHostSection.classList.add('step-hidden'));
+return;
+}
+roomLabel.textContent=role==='host'?'自定义房间号（创建）':'输入创建方的房间号（加入）';
+roomInput.placeholder=role==='host'?'自己输入房间号，例如 myroom01':'填写对方创建的房间号';
+waitingArea.classList.add('step-hidden');
+sigConnectBtn.disabled=false;
+sigConnectBtn.textContent='连接信令并开始';
+}
 connMode.addEventListener('change',updateModeUI);
-signalingUrl.addEventListener('change',saveUrl);signalingUrl.addEventListener('blur',saveUrl);
-modalHostBtn.addEventListener('click',()=>{modalHostBtn.classList.add('active');modalJoinBtn.classList.remove('active');role='host';resetPeer();updateRoleUI();if(connMode.value==='manual'){modalHostSection.classList.remove('step-hidden');modalJoinSection.classList.add('step-hidden');initHostPeer()}});
-modalJoinBtn.addEventListener('click',()=>{modalJoinBtn.classList.add('active');modalHostBtn.classList.remove('active');role='join';resetPeer();updateRoleUI();if(connMode.value==='manual'){modalJoinSection.classList.remove('step-hidden');modalHostSection.classList.add('step-hidden');initJoinPeer()}});
-function stopAllTracks(){if(micTrack){micTrack.stop();micTrack=null}if(camTrack){camTrack.stop();camTrack=null}if(screenTrack){screenTrack.stop();screenTrack=null}if(screenAudioTrack){screenAudioTrack.stop();screenAudioTrack=null}micEnabled=false;camEnabled=false;screenEnabled=false;micBtn.classList.remove('active');camBtn.classList.remove('active');screenBtn.classList.remove('active');localCamVideo.srcObject=null;localScreenVideo.srcObject=null;remoteCamVideo.srcObject=null;remoteScreenVideo.srcObject=null;localCamOverlay.classList.remove('hidden');localCamOverlay.textContent='摄像头已关闭';localScreenOverlay.classList.remove('hidden');localScreenOverlay.textContent='屏幕未共享';remoteCamOverlay.classList.remove('hidden');remoteCamOverlay.textContent='对方摄像头已关闭';remoteScreenOverlay.classList.remove('hidden');remoteScreenOverlay.textContent='对方屏幕未共享';const a=document.getElementById('remoteAudioElem');if(a){a.srcObject=null;a.remove()}}
-function returnToWizard(){if(returningToWizard)return;returningToWizard=true;log('对方已离开或连接断开，返回连接向导');stopAllTracks();if(pc){try{pc.close()}catch{}pc=null}if(ws){try{ws.close()}catch{}ws=null}dataChannel=null;audioTransceiver=videoTransceiver1=videoTransceiver2=null;remoteVideoCount=0;chatInput.disabled=true;sendChatBtn.disabled=true;fileBtn.disabled=true;chatMessages.innerHTML='<div style="color:var(--discord-text-muted);text-align:center">连接后聊天</div>';statusEl.textContent='就绪';pendingFiles.clear();activeSends.clear();offerHandled=false;currentRoom='';waitingArea.classList.add('step-hidden');sigConnectBtn.disabled=false;sigConnectBtn.textContent='连接信令并开始';modalHostSdp.value=modalJoinAnswer.value='';modalCopyJoin.disabled=modalFinishJoin.disabled=modalApplyAnswer.disabled=true;modalApplyOffer.disabled=true;initModal.style.display='flex';setTimeout(()=>{returningToWizard=false},500)}
-function resetPeer(){if(pc){pc.close();pc=null}if(ws){ws.close();ws=null}dataChannel=null;audioTransceiver=videoTransceiver1=videoTransceiver2=null;remoteVideoCount=0;modalHostSdp.value=modalJoinAnswer.value='';modalCopyJoin.disabled=modalFinishJoin.disabled=modalApplyAnswer.disabled=true;modalApplyOffer.disabled=modalJoinOffer.value.trim().length<=10;currentRoom='';offerHandled=false;waitingArea.classList.add('step-hidden');sigConnectBtn.disabled=false;sigConnectBtn.textContent='连接信令并开始';pendingFiles.clear();activeSends.clear()}
-document.querySelectorAll('.video-box').forEach(b=>b.addEventListener('click',()=>{if(b.classList.contains('focused')){videoGrid.classList.remove('focused-mode');b.classList.remove('focused')}else{document.querySelectorAll('.video-box').forEach(x=>x.classList.remove('focused'));videoGrid.classList.add('focused-mode');b.classList.add('focused')}}));
-toggleControlsBtn.addEventListener('click',()=>{controlsExpanded=!controlsExpanded;controlBar.classList.toggle('collapsed',!controlsExpanded);toggleControlsBtn.style.transform=controlsExpanded?'rotate(0)':'rotate(180deg)'});
+signalingUrl.addEventListener('change',saveUrl);
+signalingUrl.addEventListener('blur',saveUrl);
+modalHostBtn.addEventListener('click',()=>{
+modalHostBtn.classList.add('active');
+modalJoinBtn.classList.remove('active');
+role='host';
+resetPeer();
+updateRoleUI();
+if(connMode.value==='manual'){
+modalHostSection.classList.remove('step-hidden');
+modalJoinSection.classList.add('step-hidden');
+initHostPeer();
+}
+});
+modalJoinBtn.addEventListener('click',()=>{
+modalJoinBtn.classList.add('active');
+modalHostBtn.classList.remove('active');
+role='join';
+resetPeer();
+updateRoleUI();
+if(connMode.value==='manual'){
+modalJoinSection.classList.remove('step-hidden');
+modalHostSection.classList.add('step-hidden');
+initJoinPeer();
+}
+});
+function stopAllTracks(){
+if(micTrack){micTrack.stop();micTrack=null}
+if(camTrack){camTrack.stop();camTrack=null}
+if(screenTrack){screenTrack.stop();screenTrack=null}
+if(screenAudioTrack){screenAudioTrack.stop();screenAudioTrack=null}
+micEnabled=false;camEnabled=false;screenEnabled=false;
+micBtn.classList.remove('active');
+camBtn.classList.remove('active');
+screenBtn.classList.remove('active');
+localCamVideo.srcObject=null;
+localScreenVideo.srcObject=null;
+remoteCamVideo.srcObject=null;
+remoteScreenVideo.srcObject=null;
+localCamOverlay.classList.remove('hidden');
+localCamOverlay.textContent='摄像头已关闭';
+localScreenOverlay.classList.remove('hidden');
+localScreenOverlay.textContent='屏幕未共享';
+remoteCamOverlay.classList.remove('hidden');
+remoteCamOverlay.textContent='对方摄像头已关闭';
+remoteScreenOverlay.classList.remove('hidden');
+remoteScreenOverlay.textContent='对方屏幕未共享';
+const a=document.getElementById('remoteAudioElem');
+if(a){a.srcObject=null;a.remove()}
+}
+function returnToWizard(){
+if(returningToWizard)return;
+returningToWizard=true;
+clearAllTimers();
+log('对方已离开或连接断开，返回连接向导');
+stopAllTracks();
+if(pc){try{pc.close()}catch{}pc=null}
+if(ws){try{ws.close()}catch{}ws=null}
+dataChannel=null;
+audioTransceiver=videoTransceiver1=videoTransceiver2=null;
+remoteVideoCount=0;
+chatInput.disabled=true;
+sendChatBtn.disabled=true;
+fileBtn.disabled=true;
+chatMessages.innerHTML='<div style="color:var(--discord-text-muted);text-align:center">连接后聊天</div>';
+statusEl.textContent='就绪';
+pendingFiles.clear();
+activeSends.clear();
+offerHandled=false;
+currentRoom='';
+waitingArea.classList.add('step-hidden');
+sigConnectBtn.disabled=false;
+sigConnectBtn.textContent='连接信令并开始';
+modalHostSdp.value=modalJoinAnswer.value='';
+modalCopyJoin.disabled=modalFinishJoin.disabled=modalApplyAnswer.disabled=true;
+modalApplyOffer.disabled=true;
+initModal.style.display='flex';
+setTimeout(()=>{returningToWizard=false},500);
+}
+function resetPeer(){
+clearAllTimers();
+if(pc){pc.close();pc=null}
+if(ws){ws.close();ws=null}
+dataChannel=null;
+audioTransceiver=videoTransceiver1=videoTransceiver2=null;
+remoteVideoCount=0;
+modalHostSdp.value=modalJoinAnswer.value='';
+modalCopyJoin.disabled=modalFinishJoin.disabled=modalApplyAnswer.disabled=true;
+modalApplyOffer.disabled=modalJoinOffer.value.trim().length<=10;
+currentRoom='';
+offerHandled=false;
+waitingArea.classList.add('step-hidden');
+sigConnectBtn.disabled=false;
+sigConnectBtn.textContent='连接信令并开始';
+pendingFiles.clear();
+activeSends.clear();
+}
+document.querySelectorAll('.video-box').forEach(b=>b.addEventListener('click',()=>{
+if(b.classList.contains('focused')){
+videoGrid.classList.remove('focused-mode');
+b.classList.remove('focused');
+}else{
+document.querySelectorAll('.video-box').forEach(x=>x.classList.remove('focused'));
+videoGrid.classList.add('focused-mode');
+b.classList.add('focused');
+}
+}));
+toggleControlsBtn.addEventListener('click',()=>{
+controlsExpanded=!controlsExpanded;
+controlBar.classList.toggle('collapsed',!controlsExpanded);
+toggleControlsBtn.style.transform=controlsExpanded?'rotate(0)':'rotate(180deg)';
+});
 toggleSidebarBtn.addEventListener('click',()=>sidebarPanel.classList.toggle('mobile-hidden'));
-micBtn.addEventListener('click',async()=>{micEnabled=!micEnabled;if(micEnabled){try{const s=await navigator.mediaDevices.getUserMedia({audio:{echoCancellation:true,noiseSuppression:true,autoGainControl:true,channelCount:1}});micTrack=s.getAudioTracks()[0];if(audioTransceiver)await audioTransceiver.sender.replaceTrack(micTrack);micBtn.classList.add('active');log('麦克风已开启')}catch(e){micEnabled=false;micBtn.classList.remove('active');log('麦克风获取失败: '+e.message)}}else{if(micTrack){micTrack.stop();if(audioTransceiver)await audioTransceiver.sender.replaceTrack(null);micTrack=null}micBtn.classList.remove('active');log('麦克风已关闭')}});
-soundBtn.addEventListener('click',()=>{soundEnabled=!soundEnabled;remoteCamVideo.muted=!soundEnabled;remoteScreenVideo.muted=!soundEnabled;const a=document.getElementById('remoteAudioElem');if(a)a.muted=!soundEnabled;soundEnabled?(soundBtn.classList.add('active'),log('扬声器已开启')):(soundBtn.classList.remove('active'),log('扬声器已静音'))});
-camBtn.addEventListener('click',async()=>{camEnabled=!camEnabled;if(camEnabled){try{const s=await navigator.mediaDevices.getUserMedia({video:{width:{ideal:640},height:{ideal:480}}});camTrack=s.getVideoTracks()[0];localCamVideo.srcObject=new MediaStream([camTrack]);localCamOverlay.classList.add('hidden');if(videoTransceiver1)await videoTransceiver1.sender.replaceTrack(camTrack);camBtn.classList.add('active');log('摄像头已开启');sendControlMessage({type:'video-state',target:'cam',enabled:true})}catch(e){camEnabled=false;camBtn.classList.remove('active');localCamOverlay.textContent='摄像头获取失败';localCamOverlay.classList.remove('hidden');log('摄像头获取失败: '+e.message)}}else{if(camTrack){camTrack.stop();if(videoTransceiver1)await videoTransceiver1.sender.replaceTrack(null);camTrack=null}localCamVideo.srcObject=null;localCamOverlay.textContent='摄像头已关闭';localCamOverlay.classList.remove('hidden');camBtn.classList.remove('active');log('摄像头已关闭');sendControlMessage({type:'video-state',target:'cam',enabled:false})}});
-screenBtn.addEventListener('click',async()=>{if(!navigator.mediaDevices.getDisplayMedia){alert('当前浏览器或手机系统不支持屏幕共享功能');return}screenEnabled=!screenEnabled;if(screenEnabled){try{const s=await navigator.mediaDevices.getDisplayMedia({video:true,audio:true});screenTrack=s.getVideoTracks()[0];screenTrack.onended=()=>{if(screenEnabled)screenBtn.click()};localScreenVideo.srcObject=new MediaStream([screenTrack]);localScreenOverlay.classList.add('hidden');if(videoTransceiver2)await videoTransceiver2.sender.replaceTrack(screenTrack);const audioTracks=s.getAudioTracks();if(audioTracks.length>0){screenAudioTrack=audioTracks[0];if(audioTransceiver)await audioTransceiver.sender.replaceTrack(screenAudioTrack);log('屏幕共享已开启（含系统声音）')}else{screenAudioTrack=null;log('屏幕共享已开启（无系统声音）')}screenBtn.classList.add('active');sendControlMessage({type:'video-state',target:'screen',enabled:true})}catch(e){screenEnabled=false;screenBtn.classList.remove('active');localScreenOverlay.textContent='屏幕共享未开启/不支持';localScreenOverlay.classList.remove('hidden');log('屏幕共享已取消或被拒绝: '+e.message)}}else{if(screenTrack){screenTrack.stop();if(videoTransceiver2)await videoTransceiver2.sender.replaceTrack(null);screenTrack=null}if(screenAudioTrack){screenAudioTrack.stop();screenAudioTrack=null;if(audioTransceiver){if(micEnabled&&micTrack)await audioTransceiver.sender.replaceTrack(micTrack);else await audioTransceiver.sender.replaceTrack(null)}}localScreenVideo.srcObject=null;localScreenOverlay.textContent='屏幕共享未开启';localScreenOverlay.classList.remove('hidden');screenBtn.classList.remove('active');log('屏幕共享已关闭');sendControlMessage({type:'video-state',target:'screen',enabled:false})}});
-function sendControlMessage(o){if(dataChannel&&dataChannel.readyState==='open')dataChannel.send(JSON.stringify(o))}
-modalCopyHost.addEventListener('click',()=>navigator.clipboard.writeText(modalHostSdp.value).then(()=>{modalCopyHost.textContent='已复制';setTimeout(()=>modalCopyHost.textContent='复制 Offer',2000)}));
-modalCopyJoin.addEventListener('click',()=>navigator.clipboard.writeText(modalJoinAnswer.value).then(()=>{modalCopyJoin.textContent='已复制';setTimeout(()=>modalCopyJoin.textContent='复制 Answer',2000)}));
+micBtn.addEventListener('click',async()=>{
+micEnabled=!micEnabled;
+if(micEnabled){
+try{
+const s=await navigator.mediaDevices.getUserMedia({audio:{echoCancellation:true,noiseSuppression:true,autoGainControl:true,channelCount:1}});
+micTrack=s.getAudioTracks()[0];
+if(audioTransceiver)await audioTransceiver.sender.replaceTrack(micTrack);
+micBtn.classList.add('active');
+log('麦克风已开启');
+}catch(e){
+micEnabled=false;
+micBtn.classList.remove('active');
+log('麦克风获取失败: '+e.message);
+}
+}else{
+if(micTrack){
+micTrack.stop();
+if(audioTransceiver)await audioTransceiver.sender.replaceTrack(null);
+micTrack=null;
+}
+micBtn.classList.remove('active');
+log('麦克风已关闭');
+}
+});
+soundBtn.addEventListener('click',()=>{
+soundEnabled=!soundEnabled;
+remoteCamVideo.muted=!soundEnabled;
+remoteScreenVideo.muted=!soundEnabled;
+const a=document.getElementById('remoteAudioElem');
+if(a)a.muted=!soundEnabled;
+soundEnabled?(soundBtn.classList.add('active'),log('扬声器已开启')):(soundBtn.classList.remove('active'),log('扬声器已静音'));
+});
+camBtn.addEventListener('click',async()=>{
+camEnabled=!camEnabled;
+if(camEnabled){
+try{
+const s=await navigator.mediaDevices.getUserMedia({video:{width:{ideal:640},height:{ideal:480}}});
+camTrack=s.getVideoTracks()[0];
+localCamVideo.srcObject=new MediaStream([camTrack]);
+localCamOverlay.classList.add('hidden');
+if(videoTransceiver1)await videoTransceiver1.sender.replaceTrack(camTrack);
+camBtn.classList.add('active');
+log('摄像头已开启');
+sendControlMessage({type:'video-state',target:'cam',enabled:true});
+}catch(e){
+camEnabled=false;
+camBtn.classList.remove('active');
+localCamOverlay.textContent='摄像头获取失败';
+localCamOverlay.classList.remove('hidden');
+log('摄像头获取失败: '+e.message);
+}
+}else{
+if(camTrack){
+camTrack.stop();
+if(videoTransceiver1)await videoTransceiver1.sender.replaceTrack(null);
+camTrack=null;
+}
+localCamVideo.srcObject=null;
+localCamOverlay.textContent='摄像头已关闭';
+localCamOverlay.classList.remove('hidden');
+camBtn.classList.remove('active');
+log('摄像头已关闭');
+sendControlMessage({type:'video-state',target:'cam',enabled:false});
+}
+});
+screenBtn.addEventListener('click',async()=>{
+if(!navigator.mediaDevices.getDisplayMedia){
+alert('当前浏览器或手机系统不支持屏幕共享功能');
+return;
+}
+screenEnabled=!screenEnabled;
+if(screenEnabled){
+try{
+const s=await navigator.mediaDevices.getDisplayMedia({video:true,audio:true});
+screenTrack=s.getVideoTracks()[0];
+screenTrack.onended=()=>{if(screenEnabled)screenBtn.click()};
+localScreenVideo.srcObject=new MediaStream([screenTrack]);
+localScreenOverlay.classList.add('hidden');
+if(videoTransceiver2)await videoTransceiver2.sender.replaceTrack(screenTrack);
+const audioTracks=s.getAudioTracks();
+if(audioTracks.length>0){
+screenAudioTrack=audioTracks[0];
+if(audioTransceiver)await audioTransceiver.sender.replaceTrack(screenAudioTrack);
+log('屏幕共享已开启（含系统声音）');
+}else{
+screenAudioTrack=null;
+log('屏幕共享已开启（无系统声音）');
+}
+screenBtn.classList.add('active');
+sendControlMessage({type:'video-state',target:'screen',enabled:true});
+}catch(e){
+screenEnabled=false;
+screenBtn.classList.remove('active');
+localScreenOverlay.textContent='屏幕共享未开启/不支持';
+localScreenOverlay.classList.remove('hidden');
+log('屏幕共享已取消或被拒绝: '+e.message);
+}
+}else{
+if(screenTrack){
+screenTrack.stop();
+if(videoTransceiver2)await videoTransceiver2.sender.replaceTrack(null);
+screenTrack=null;
+}
+if(screenAudioTrack){
+screenAudioTrack.stop();
+screenAudioTrack=null;
+if(audioTransceiver){
+if(micEnabled&&micTrack)await audioTransceiver.sender.replaceTrack(micTrack);
+else await audioTransceiver.sender.replaceTrack(null);
+}
+}
+localScreenVideo.srcObject=null;
+localScreenOverlay.textContent='屏幕共享未开启';
+localScreenOverlay.classList.remove('hidden');
+screenBtn.classList.remove('active');
+log('屏幕共享已关闭');
+sendControlMessage({type:'video-state',target:'screen',enabled:false});
+}
+});
+function sendControlMessage(o){
+if(dataChannel&&dataChannel.readyState==='open')dataChannel.send(JSON.stringify(o));
+}
+modalCopyHost.addEventListener('click',()=>navigator.clipboard.writeText(modalHostSdp.value).then(()=>{
+modalCopyHost.textContent='已复制';
+setTimeout(()=>modalCopyHost.textContent='复制 Offer',2000);
+}));
+modalCopyJoin.addEventListener('click',()=>navigator.clipboard.writeText(modalJoinAnswer.value).then(()=>{
+modalCopyJoin.textContent='已复制';
+setTimeout(()=>modalCopyJoin.textContent='复制 Answer',2000);
+}));
 modalHostAnswer.addEventListener('input',()=>modalApplyAnswer.disabled=modalHostAnswer.value.trim().length<=10);
 modalJoinOffer.addEventListener('input',()=>modalApplyOffer.disabled=modalJoinOffer.value.trim().length<=10);
-function formatSize(bytes){if(bytes<1024)return bytes+' B';if(bytes<1024*1024)return(bytes/1024).toFixed(1)+' KB';return(bytes/(1024*1024)).toFixed(2)+' MB'}
-function createFileMsgEl(meta,isLocal){const wrap=document.createElement('div');wrap.className=`file-msg ${isLocal?'local':'remote'}`;wrap.innerHTML=`<div class="file-name">${isLocal?'我发送: ':'对方发送: '}${meta.name}</div><div class="file-meta">${formatSize(meta.size)} · ${meta.mime||'未知类型'}</div><div class="progress-bar-wrap"><div class="progress-bar" style="width:0%"></div></div><div class="status-text" style="font-size:.75rem;color:var(--discord-text-muted)">准备传输...</div>`;chatMessages.appendChild(wrap);chatMessages.scrollTop=chatMessages.scrollHeight;return{el:wrap,progressBar:wrap.querySelector('.progress-bar'),statusText:wrap.querySelector('.status-text')}}
-function handleFileMeta(meta){const id=meta.id;const ui=createFileMsgEl(meta,false);pendingFiles.set(id,{meta,chunks:[],received:0,total:meta.totalChunks,ui});ui.statusText.textContent=`接收中 0%`;log(`开始接收文件: ${meta.name} (${formatSize(meta.size)})`)}
-function processChunkData(id,data){const entry=pendingFiles.get(id);if(!entry)return;entry.chunks.push(data);entry.received++;const pct=Math.min(100,Math.round(entry.received/entry.total*100));entry.ui.progressBar.style.width=pct+'%';entry.ui.statusText.textContent=`接收中 ${pct}% (${entry.received}/${entry.total})`;if(entry.received>=entry.total)finishReceiveFile(id)}
-function handleFileChunk(raw){const process=buffer=>{const view=new Uint8Array(buffer);if(view.length<36)return;const id=String.fromCharCode.apply(null,view.subarray(0,36));const data=view.subarray(36);processChunkData(id,data)};if(raw instanceof Blob){raw.arrayBuffer().then(process).catch(err=>log('文件分片解析失败: '+err.message))}else if(raw instanceof ArrayBuffer){process(raw)}else if(raw instanceof Uint8Array){process(raw.buffer)}}
-function finishReceiveFile(id){const entry=pendingFiles.get(id);if(!entry)return;const{meta,chunks,ui}=entry;const totalLen=chunks.reduce((s,c)=>s+c.length,0);const result=new Uint8Array(totalLen);let offset=0;for(const c of chunks){result.set(c,offset);offset+=c.length}const blob=new Blob([result],{type:meta.mime||'application/octet-stream'});const url=URL.createObjectURL(blob);ui.progressBar.style.width='100%';ui.statusText.innerHTML=`接收完成 · <a class="download-btn" href="${url}" download="${meta.name}">下载文件</a>`;log(`文件接收完成: ${meta.name}`);pendingFiles.delete(id)}
-function cancelReceiveFile(id){const entry=pendingFiles.get(id);if(!entry)return;entry.ui.progressBar.style.width='0%';entry.ui.statusText.textContent='对方已取消发送';pendingFiles.delete(id);log(`文件接收已取消: ${entry.meta.name}`)}
-async function sendFile(file){if(!dataChannel||dataChannel.readyState!=='open'){alert('聊天通道未就绪');return}const id=crypto.randomUUID();const totalChunks=Math.ceil(file.size/CHUNK_SIZE)||1;const meta={type:'file-meta',id,name:file.name,size:file.size,mime:file.type||'application/octet-stream',totalChunks};dataChannel.send(JSON.stringify(meta));const ui=createFileMsgEl(meta,true);ui.statusText.textContent='发送中 0%';const cancelBtn=document.createElement('button');cancelBtn.className='cancel-btn';cancelBtn.textContent='取消';ui.statusText.parentNode.appendChild(cancelBtn);let cancelled=false;activeSends.set(id,{cancelled:false});cancelBtn.onclick=()=>{cancelled=true;activeSends.get(id).cancelled=true;dataChannel.send(JSON.stringify({type:'file-cancel',id}));ui.progressBar.style.width='0%';ui.statusText.textContent='已取消';cancelBtn.remove();log(`文件发送已取消: ${file.name}`);activeSends.delete(id)};dataChannel.bufferedAmountLowThreshold=BUFFER_THRESHOLD;const buffer=await file.arrayBuffer();const u8=new Uint8Array(buffer);let sent=0;for(let i=0;i<totalChunks;i++){if(cancelled||(activeSends.get(id)&&activeSends.get(id).cancelled))break;while(dataChannel.bufferedAmount>BUFFER_THRESHOLD){if(cancelled||(activeSends.get(id)&&activeSends.get(id).cancelled))break;await new Promise(resolve=>{const handler=()=>{dataChannel.removeEventListener('bufferedamountlow',handler);resolve()};dataChannel.addEventListener('bufferedamountlow',handler)})}if(cancelled||(activeSends.get(id)&&activeSends.get(id).cancelled))break;const start=i*CHUNK_SIZE;const end=Math.min(start+CHUNK_SIZE,u8.length);const chunkData=u8.subarray(start,end);const packet=new Uint8Array(36+chunkData.length);for(let j=0;j<36;j++)packet[j]=id.charCodeAt(j);packet.set(chunkData,36);try{dataChannel.send(packet)}catch(e){log('发送分片失败: '+e.message);ui.statusText.textContent='发送失败';cancelBtn.remove();activeSends.delete(id);return}sent++;const pct=Math.round(sent/totalChunks*100);ui.progressBar.style.width=pct+'%';ui.statusText.textContent=`发送中 ${pct}% (${sent}/${totalChunks})`}if(!cancelled&&!(activeSends.get(id)&&activeSends.get(id).cancelled)){ui.progressBar.style.width='100%';ui.statusText.textContent='发送完成';cancelBtn.remove();log(`文件发送完成: ${file.name}`)}activeSends.delete(id)}
+function formatSize(bytes){
+if(bytes<1024)return bytes+' B';
+if(bytes<1024*1024)return(bytes/1024).toFixed(1)+' KB';
+return(bytes/(1024*1024)).toFixed(2)+' MB';
+}
+function createFileMsgEl(meta,isLocal){
+const wrap=document.createElement('div');
+wrap.className=`file-msg ${isLocal?'local':'remote'}`;
+wrap.innerHTML=`<div class="file-name">${isLocal?'我发送: ':'对方发送: '}${meta.name}</div><div class="file-meta">${formatSize(meta.size)} · ${meta.mime||'未知类型'}</div><div class="progress-bar-wrap"><div class="progress-bar" style="width:0%"></div></div><div class="status-text" style="font-size:.75rem;color:var(--discord-text-muted)">准备传输...</div>`;
+chatMessages.appendChild(wrap);
+chatMessages.scrollTop=chatMessages.scrollHeight;
+return{el:wrap,progressBar:wrap.querySelector('.progress-bar'),statusText:wrap.querySelector('.status-text')};
+}
+function handleFileMeta(meta){
+const id=meta.id;
+const ui=createFileMsgEl(meta,false);
+pendingFiles.set(id,{meta,chunks:[],received:0,total:meta.totalChunks,ui});
+ui.statusText.textContent=`接收中 0%`;
+log(`开始接收文件: ${meta.name} (${formatSize(meta.size)})`);
+}
+function processChunkData(id,data){
+const entry=pendingFiles.get(id);
+if(!entry)return;
+entry.chunks.push(data);
+entry.received++;
+const pct=Math.min(100,Math.round(entry.received/entry.total*100));
+entry.ui.progressBar.style.width=pct+'%';
+entry.ui.statusText.textContent=`接收中 ${pct}% (${entry.received}/${entry.total})`;
+if(entry.received>=entry.total)finishReceiveFile(id);
+}
+function handleFileChunk(raw){
+const process=buffer=>{
+const view=new Uint8Array(buffer);
+if(view.length<36)return;
+const id=String.fromCharCode.apply(null,view.subarray(0,36));
+const data=view.subarray(36);
+processChunkData(id,data);
+};
+if(raw instanceof Blob){
+raw.arrayBuffer().then(process).catch(err=>log('文件分片解析失败: '+err.message));
+}else if(raw instanceof ArrayBuffer){
+process(raw);
+}else if(raw instanceof Uint8Array){
+process(raw.buffer);
+}
+}
+function finishReceiveFile(id){
+const entry=pendingFiles.get(id);
+if(!entry)return;
+const{meta,chunks,ui}=entry;
+const totalLen=chunks.reduce((s,c)=>s+c.length,0);
+const result=new Uint8Array(totalLen);
+let offset=0;
+for(const c of chunks){result.set(c,offset);offset+=c.length}
+const blob=new Blob([result],{type:meta.mime||'application/octet-stream'});
+const url=URL.createObjectURL(blob);
+ui.progressBar.style.width='100%';
+ui.statusText.innerHTML=`接收完成 · <a class="download-btn" href="${url}" download="${meta.name}">下载文件</a>`;
+log(`文件接收完成: ${meta.name}`);
+pendingFiles.delete(id);
+}
+function cancelReceiveFile(id){
+const entry=pendingFiles.get(id);
+if(!entry)return;
+entry.ui.progressBar.style.width='0%';
+entry.ui.statusText.textContent='对方已取消发送';
+pendingFiles.delete(id);
+log(`文件接收已取消: ${entry.meta.name}`);
+}
+async function sendFile(file){
+if(!dataChannel||dataChannel.readyState!=='open'){alert('聊天通道未就绪');return}
+const id=crypto.randomUUID();
+const totalChunks=Math.ceil(file.size/CHUNK_SIZE)||1;
+const meta={type:'file-meta',id,name:file.name,size:file.size,mime:file.type||'application/octet-stream',totalChunks};
+dataChannel.send(JSON.stringify(meta));
+const ui=createFileMsgEl(meta,true);
+ui.statusText.textContent='发送中 0%';
+const cancelBtn=document.createElement('button');
+cancelBtn.className='cancel-btn';
+cancelBtn.textContent='取消';
+ui.statusText.parentNode.appendChild(cancelBtn);
+let cancelled=false;
+activeSends.set(id,{cancelled:false});
+cancelBtn.onclick=()=>{
+cancelled=true;
+activeSends.get(id).cancelled=true;
+dataChannel.send(JSON.stringify({type:'file-cancel',id}));
+ui.progressBar.style.width='0%';
+ui.statusText.textContent='已取消';
+cancelBtn.remove();
+log(`文件发送已取消: ${file.name}`);
+activeSends.delete(id);
+};
+dataChannel.bufferedAmountLowThreshold=BUFFER_THRESHOLD;
+const buffer=await file.arrayBuffer();
+const u8=new Uint8Array(buffer);
+let sent=0;
+for(let i=0;i<totalChunks;i++){
+if(cancelled||(activeSends.get(id)&&activeSends.get(id).cancelled))break;
+while(dataChannel.bufferedAmount>BUFFER_THRESHOLD){
+if(cancelled||(activeSends.get(id)&&activeSends.get(id).cancelled))break;
+await new Promise(resolve=>{
+const handler=()=>{dataChannel.removeEventListener('bufferedamountlow',handler);resolve()};
+dataChannel.addEventListener('bufferedamountlow',handler);
+});
+}
+if(cancelled||(activeSends.get(id)&&activeSends.get(id).cancelled))break;
+const start=i*CHUNK_SIZE;
+const end=Math.min(start+CHUNK_SIZE,u8.length);
+const chunkData=u8.subarray(start,end);
+const packet=new Uint8Array(36+chunkData.length);
+for(let j=0;j<36;j++)packet[j]=id.charCodeAt(j);
+packet.set(chunkData,36);
+try{dataChannel.send(packet)}catch(e){
+log('发送分片失败: '+e.message);
+ui.statusText.textContent='发送失败';
+cancelBtn.remove();
+activeSends.delete(id);
+return;
+}
+sent++;
+const pct=Math.round(sent/totalChunks*100);
+ui.progressBar.style.width=pct+'%';
+ui.statusText.textContent=`发送中 ${pct}% (${sent}/${totalChunks})`;
+}
+if(!cancelled&&!(activeSends.get(id)&&activeSends.get(id).cancelled)){
+ui.progressBar.style.width='100%';
+ui.statusText.textContent='发送完成';
+cancelBtn.remove();
+log(`文件发送完成: ${file.name}`);
+}
+activeSends.delete(id);
+}
 fileBtn.addEventListener('click',()=>{if(!fileBtn.disabled)fileInput.click()});
 fileInput.addEventListener('change',()=>{const f=fileInput.files[0];if(f)sendFile(f);fileInput.value=''});
-function setupDataChannelEvents(){dataChannel.binaryType='arraybuffer';dataChannel.onopen=()=>{log('聊天通道已连通');chatInput.disabled=false;sendChatBtn.disabled=false;fileBtn.disabled=false};dataChannel.onclose=()=>{log('数据通道已关闭');returnToWizard()};dataChannel.onmessage=e=>{if(e.data instanceof ArrayBuffer||e.data instanceof Blob||e.data instanceof Uint8Array){handleFileChunk(e.data);return}if(typeof e.data==='string'){try{const d=JSON.parse(e.data);if(d.type==='video-state'){if(d.target==='cam')d.enabled?remoteCamOverlay.classList.add('hidden'):(remoteCamOverlay.textContent='对方摄像头已关闭',remoteCamOverlay.classList.remove('hidden'));else if(d.target==='screen')d.enabled?remoteScreenOverlay.classList.add('hidden'):(remoteScreenOverlay.textContent='对方屏幕未共享',remoteScreenOverlay.classList.remove('hidden'));return}if(d.type==='file-meta'){handleFileMeta(d);return}if(d.type==='file-cancel'){cancelReceiveFile(d.id);return}}catch{}appendMessage(e.data,'remote')}}}
-function appendMessage(t,ty){const d=document.createElement('div');d.className=`chat-msg ${ty}`;d.textContent=(ty==='local'?'我: ':'对方: ')+t;chatMessages.appendChild(d);chatMessages.scrollTop=chatMessages.scrollHeight}
-sendChatBtn.addEventListener('click',()=>{const t=chatInput.value.trim();if(!t)return;if(dataChannel&&dataChannel.readyState==='open'){dataChannel.send(t);appendMessage(t,'local');chatInput.value=''}else alert('聊天通道未就绪')});
+function setupDataChannelEvents(){
+dataChannel.binaryType='arraybuffer';
+dataChannel.onopen=()=>{
+log('聊天通道已连通');
+chatInput.disabled=false;
+sendChatBtn.disabled=false;
+fileBtn.disabled=false;
+cancelDisconnectTimer();
+startDataChannelKeepAlive();
+};
+dataChannel.onclose=()=>{
+log('数据通道已关闭');
+if(dcKeepAliveTimer){clearInterval(dcKeepAliveTimer);dcKeepAliveTimer=null}
+scheduleDisconnect('数据通道关闭');
+};
+dataChannel.onmessage=e=>{
+if(e.data instanceof ArrayBuffer||e.data instanceof Blob||e.data instanceof Uint8Array){
+handleFileChunk(e.data);
+return;
+}
+if(typeof e.data==='string'){
+try{
+const d=JSON.parse(e.data);
+if(d.type==='hb'||d.type==='ping')return;
+if(d.type==='video-state'){
+if(d.target==='cam')d.enabled?remoteCamOverlay.classList.add('hidden'):(remoteCamOverlay.textContent='对方摄像头已关闭',remoteCamOverlay.classList.remove('hidden'));
+else if(d.target==='screen')d.enabled?remoteScreenOverlay.classList.add('hidden'):(remoteScreenOverlay.textContent='对方屏幕未共享',remoteScreenOverlay.classList.remove('hidden'));
+return;
+}
+if(d.type==='file-meta'){handleFileMeta(d);return}
+if(d.type==='file-cancel'){cancelReceiveFile(d.id);return}
+}catch{}
+appendMessage(e.data,'remote');
+}
+};
+}
+function appendMessage(t,ty){
+const d=document.createElement('div');
+d.className=`chat-msg ${ty}`;
+d.textContent=(ty==='local'?'我: ':'对方: ')+t;
+chatMessages.appendChild(d);
+chatMessages.scrollTop=chatMessages.scrollHeight;
+}
+sendChatBtn.addEventListener('click',()=>{
+const t=chatInput.value.trim();
+if(!t)return;
+if(dataChannel&&dataChannel.readyState==='open'){
+dataChannel.send(t);
+appendMessage(t,'local');
+chatInput.value='';
+}else alert('聊天通道未就绪');
+});
 chatInput.addEventListener('keypress',e=>{if(e.key==='Enter')sendChatBtn.click()});
-function handleIncomingTrack(e){log('已捕获远端媒体轨道: '+e.track.kind);statusEl.textContent='通话中';let s=e.streams[0]||new MediaStream([e.track]);if(e.track.kind==='audio'){let a=document.getElementById('remoteAudioElem');if(!a){a=document.createElement('audio');a.id='remoteAudioElem';a.autoplay=true;a.playsInline=true;a.muted=!soundEnabled;document.body.appendChild(a)}a.srcObject=s;a.play().catch(()=>{})}else if(e.track.kind==='video'){if(remoteVideoCount===0){remoteCamVideo.srcObject=s;remoteCamVideo.play().catch(()=>{});remoteCamOverlay.classList.add('hidden');remoteVideoCount++}else{remoteScreenVideo.srcObject=s;remoteScreenVideo.play().catch(()=>{});remoteScreenOverlay.classList.add('hidden')}}}
-function bindConnectionState(pcRef){pcRef.onconnectionstatechange=()=>{if(pcRef.connectionState==='disconnected'||pcRef.connectionState==='failed'||pcRef.connectionState==='closed'){log('连接状态: '+pcRef.connectionState);returnToWizard()}};pcRef.oniceconnectionstatechange=()=>{if(pcRef.iceConnectionState==='disconnected'||pcRef.iceConnectionState==='failed'||pcRef.iceConnectionState==='closed'){log('ICE状态: '+pcRef.iceConnectionState);returnToWizard()}}}
-function createHostPeerConnection(){pc=new RTCPeerConnection(ICE_SERVERS);bindConnectionState(pc);audioTransceiver=pc.addTransceiver('audio',{direction:'sendrecv'});videoTransceiver1=pc.addTransceiver('video',{direction:'sendrecv'});videoTransceiver2=pc.addTransceiver('video',{direction:'sendrecv'});if(micTrack&&audioTransceiver)audioTransceiver.sender.replaceTrack(micTrack).catch(()=>{});if(camTrack&&videoTransceiver1)videoTransceiver1.sender.replaceTrack(camTrack).catch(()=>{});if(screenTrack&&videoTransceiver2)videoTransceiver2.sender.replaceTrack(screenTrack).catch(()=>{});pc.ontrack=handleIncomingTrack}
-function createJoinPeerConnection(){pc=new RTCPeerConnection(ICE_SERVERS);bindConnectionState(pc);pc.ontrack=handleIncomingTrack;pc.ondatachannel=e=>{dataChannel=e.channel;setupDataChannelEvents()}}
-function bindJoinTransceivers(){audioTransceiver=videoTransceiver1=videoTransceiver2=null;for(const t of pc.getTransceivers()){const k=t.receiver?.track?.kind;if(k==='audio'&&!audioTransceiver)audioTransceiver=t;else if(k==='video'){if(!videoTransceiver1)videoTransceiver1=t;else if(!videoTransceiver2)videoTransceiver2=t}}[audioTransceiver,videoTransceiver1,videoTransceiver2].forEach(t=>{if(t&&t.direction!=='sendrecv')try{t.direction='sendrecv'}catch{}});if(micTrack&&audioTransceiver)audioTransceiver.sender.replaceTrack(micTrack).catch(()=>{});if(camTrack&&videoTransceiver1)videoTransceiver1.sender.replaceTrack(camTrack).catch(()=>{});if(screenTrack&&videoTransceiver2)videoTransceiver2.sender.replaceTrack(screenTrack).catch(()=>{})}
-async function initHostPeer(){createHostPeerConnection();dataChannel=pc.createDataChannel('chat');setupDataChannelEvents();let g=false;pc.onicecandidate=e=>{if(!e.candidate&&!g){g=true;modalHostSdp.value=JSON.stringify(pc.localDescription);log('Host Offer 收集完成');if(ws&&ws.readyState===1)ws.send(JSON.stringify({type:'offer',room:currentRoom,sdp:pc.localDescription}))}};const o=await pc.createOffer();await pc.setLocalDescription(o);setTimeout(()=>{if(!modalHostSdp.value){modalHostSdp.value=JSON.stringify(pc.localDescription);log('Host Offer 已就绪');if(ws&&ws.readyState===1)ws.send(JSON.stringify({type:'offer',room:currentRoom,sdp:pc.localDescription}))}},1200)}
-modalApplyAnswer.addEventListener('click',async()=>{try{const a=JSON.parse(modalHostAnswer.value.trim());await pc.setRemoteDescription(new RTCSessionDescription(a));log('Answer 加载成功，正在建立 P2P 直连...');initModal.style.display='none'}catch(e){alert('应用 Answer 失败: '+e.message)}});
-function initJoinPeer(){createJoinPeerConnection()}
-modalApplyOffer.addEventListener('click',async()=>{try{if(!pc)createJoinPeerConnection();const o=JSON.parse(modalJoinOffer.value.trim());await pc.setRemoteDescription(new RTCSessionDescription(o));bindJoinTransceivers();const a=await pc.createAnswer();await pc.setLocalDescription(a);let g=false;pc.onicecandidate=e=>{if(!e.candidate&&!g){g=true;modalJoinAnswer.value=JSON.stringify(pc.localDescription);modalCopyJoin.disabled=modalFinishJoin.disabled=false;log('Answer 收集完成，可复制发回');if(ws&&ws.readyState===1)ws.send(JSON.stringify({type:'answer',room:currentRoom,sdp:pc.localDescription}))}};setTimeout(()=>{if(!modalJoinAnswer.value){modalJoinAnswer.value=JSON.stringify(pc.localDescription);modalCopyJoin.disabled=modalFinishJoin.disabled=false;log('Answer 已就绪');if(ws&&ws.readyState===1)ws.send(JSON.stringify({type:'answer',room:currentRoom,sdp:pc.localDescription}))}},1200)}catch(e){alert('解析 Offer 失败: '+e.message)}});
-modalFinishJoin.addEventListener('click',()=>{initModal.style.display='none';log('已确认连通，进入会议')});
-sigConnectBtn.addEventListener('click',()=>{const url=signalingUrl.value.trim();if(!url.startsWith('ws://')&&!url.startsWith('wss://')){alert('请输入有效的 ws:// 或 wss:// 地址');return}saveUrl();const room=roomInput.value.trim();if(!room||room.length<2){alert('请输入房间号（至少2位）');return}resetPeer();currentRoom=room;offerHandled=false;sigConnectBtn.disabled=true;sigConnectBtn.textContent='连接中...';ws=new WebSocket(url);ws.onopen=()=>{log('信令服务器已连接');if(role==='host'){ws.send(JSON.stringify({type:'create',room:currentRoom}));log('正在创建房间: '+currentRoom)}else{ws.send(JSON.stringify({type:'join',room:currentRoom}));log('正在加入房间: '+currentRoom);initJoinPeer()}};ws.onmessage=async e=>{try{const m=JSON.parse(e.data);if(m.type==='error'){alert(m.message||'信令错误');sigConnectBtn.disabled=false;sigConnectBtn.textContent='连接信令并开始';return}if(m.type==='room-created'){log('房间创建成功: '+m.room);waitingRoomCode.textContent=m.room;waitingArea.classList.remove('step-hidden');sigConnectBtn.textContent='等待对方加入中...';initHostPeer()}if(m.type==='joined'){log('成功加入房间: '+m.room)}if(m.type==='offer'&&role==='join'&&!offerHandled){if(!pc)createJoinPeerConnection();if(pc.signalingState!=='stable'){log('忽略重复 Offer，当前状态: '+pc.signalingState);return}offerHandled=true;log('收到 Offer，开始生成 Answer');await pc.setRemoteDescription(new RTCSessionDescription(m.sdp));bindJoinTransceivers();const a=await pc.createAnswer();await pc.setLocalDescription(a);let g=false;pc.onicecandidate=ev=>{if(!ev.candidate&&!g){g=true;ws.send(JSON.stringify({type:'answer',room:currentRoom,sdp:pc.localDescription}));log('Answer 已通过信令发送');initModal.style.display='none';statusEl.textContent='通话中'}};setTimeout(()=>{if(pc.localDescription){ws.send(JSON.stringify({type:'answer',room:currentRoom,sdp:pc.localDescription}));initModal.style.display='none';statusEl.textContent='通话中'}},1200)}else if(m.type==='answer'&&role==='host'){if(pc.signalingState!=='have-local-offer'){log('忽略 Answer，当前状态: '+pc.signalingState);return}await pc.setRemoteDescription(new RTCSessionDescription(m.sdp));log('Answer 已通过信令接收，对方已加入，进入会议');initModal.style.display='none';statusEl.textContent='通话中'}else if(m.type==='candidate'&&pc){try{await pc.addIceCandidate(m.candidate)}catch{}}else if(m.type==='peer-left'){log('对方已离开房间');returnToWizard()}}catch(err){log('信令消息处理失败: '+err.message)}};ws.onerror=()=>{log('信令连接错误');sigConnectBtn.disabled=false;sigConnectBtn.textContent='连接信令并开始'};ws.onclose=()=>{log('信令连接已关闭');if(initModal.style.display!=='none'){sigConnectBtn.disabled=false;sigConnectBtn.textContent='连接信令并开始'}else{returnToWizard()}}});
-loadSavedUrl();initJoinPeer();updateModeUI();
+function handleIncomingTrack(e){
+log('已捕获远端媒体轨道: '+e.track.kind);
+statusEl.textContent='通话中';
+cancelDisconnectTimer();
+let s=e.streams[0]||new MediaStream([e.track]);
+if(e.track.kind==='audio'){
+let a=document.getElementById('remoteAudioElem');
+if(!a){
+a=document.createElement('audio');
+a.id='remoteAudioElem';
+a.autoplay=true;
+a.playsInline=true;
+a.muted=!soundEnabled;
+document.body.appendChild(a);
+}
+a.srcObject=s;
+a.play().catch(()=>{});
+}else if(e.track.kind==='video'){
+if(remoteVideoCount===0){
+remoteCamVideo.srcObject=s;
+remoteCamVideo.play().catch(()=>{});
+remoteCamOverlay.classList.add('hidden');
+remoteVideoCount++;
+}else{
+remoteScreenVideo.srcObject=s;
+remoteScreenVideo.play().catch(()=>{});
+remoteScreenOverlay.classList.add('hidden');
+}
+}
+}
+function bindConnectionState(pcRef){
+pcRef.onconnectionstatechange=()=>{
+const st=pcRef.connectionState;
+log('连接状态: '+st);
+if(st==='connected'){
+cancelDisconnectTimer();
+statusEl.textContent='通话中';
+}else if(st==='disconnected'){
+tryIceRestart();
+scheduleDisconnect('P2P 连接短暂断开');
+}else if(st==='failed'||st==='closed'){
+cancelDisconnectTimer();
+returnToWizard();
+}
+};
+pcRef.oniceconnectionstatechange=()=>{
+const st=pcRef.iceConnectionState;
+log('ICE状态: '+st);
+if(st==='connected'||st==='completed'){
+cancelDisconnectTimer();
+}else if(st==='disconnected'){
+tryIceRestart();
+scheduleDisconnect('ICE 短暂断开');
+}else if(st==='failed'||st==='closed'){
+cancelDisconnectTimer();
+returnToWizard();
+}
+};
+}
+function createHostPeerConnection(){
+pc=new RTCPeerConnection(ICE_SERVERS);
+bindConnectionState(pc);
+audioTransceiver=pc.addTransceiver('audio',{direction:'sendrecv'});
+videoTransceiver1=pc.addTransceiver('video',{direction:'sendrecv'});
+videoTransceiver2=pc.addTransceiver('video',{direction:'sendrecv'});
+if(micTrack&&audioTransceiver)audioTransceiver.sender.replaceTrack(micTrack).catch(()=>{});
+if(camTrack&&videoTransceiver1)videoTransceiver1.sender.replaceTrack(camTrack).catch(()=>{});
+if(screenTrack&&videoTransceiver2)videoTransceiver2.sender.replaceTrack(screenTrack).catch(()=>{});
+pc.ontrack=handleIncomingTrack;
+}
+function createJoinPeerConnection(){
+pc=new RTCPeerConnection(ICE_SERVERS);
+bindConnectionState(pc);
+pc.ontrack=handleIncomingTrack;
+pc.ondatachannel=e=>{
+dataChannel=e.channel;
+setupDataChannelEvents();
+};
+}
+function bindJoinTransceivers(){
+audioTransceiver=videoTransceiver1=videoTransceiver2=null;
+for(const t of pc.getTransceivers()){
+const k=t.receiver?.track?.kind;
+if(k==='audio'&&!audioTransceiver)audioTransceiver=t;
+else if(k==='video'){
+if(!videoTransceiver1)videoTransceiver1=t;
+else if(!videoTransceiver2)videoTransceiver2=t;
+}
+}
+[audioTransceiver,videoTransceiver1,videoTransceiver2].forEach(t=>{
+if(t&&t.direction!=='sendrecv')try{t.direction='sendrecv'}catch{}
+});
+if(micTrack&&audioTransceiver)audioTransceiver.sender.replaceTrack(micTrack).catch(()=>{});
+if(camTrack&&videoTransceiver1)videoTransceiver1.sender.replaceTrack(camTrack).catch(()=>{});
+if(screenTrack&&videoTransceiver2)videoTransceiver2.sender.replaceTrack(screenTrack).catch(()=>{});
+}
+async function initHostPeer(){
+createHostPeerConnection();
+dataChannel=pc.createDataChannel('chat');
+setupDataChannelEvents();
+let g=false;
+pc.onicecandidate=e=>{
+if(!e.candidate&&!g){
+g=true;
+modalHostSdp.value=JSON.stringify(pc.localDescription);
+log('Host Offer 收集完成');
+if(ws&&ws.readyState===1)ws.send(JSON.stringify({type:'offer',room:currentRoom,sdp:pc.localDescription}));
+}
+};
+const o=await pc.createOffer();
+await pc.setLocalDescription(o);
+setTimeout(()=>{
+if(!modalHostSdp.value){
+modalHostSdp.value=JSON.stringify(pc.localDescription);
+log('Host Offer 已就绪');
+if(ws&&ws.readyState===1)ws.send(JSON.stringify({type:'offer',room:currentRoom,sdp:pc.localDescription}));
+}
+},1200);
+}
+modalApplyAnswer.addEventListener('click',async()=>{
+try{
+const a=JSON.parse(modalHostAnswer.value.trim());
+await pc.setRemoteDescription(new RTCSessionDescription(a));
+log('Answer 加载成功，正在建立 P2P 直连...');
+initModal.style.display='none';
+}catch(e){alert('应用 Answer 失败: '+e.message)}
+});
+function initJoinPeer(){
+createJoinPeerConnection();
+}
+modalApplyOffer.addEventListener('click',async()=>{
+try{
+if(!pc)createJoinPeerConnection();
+const o=JSON.parse(modalJoinOffer.value.trim());
+await pc.setRemoteDescription(new RTCSessionDescription(o));
+bindJoinTransceivers();
+const a=await pc.createAnswer();
+await pc.setLocalDescription(a);
+let g=false;
+pc.onicecandidate=e=>{
+if(!e.candidate&&!g){
+g=true;
+modalJoinAnswer.value=JSON.stringify(pc.localDescription);
+modalCopyJoin.disabled=modalFinishJoin.disabled=false;
+log('Answer 收集完成，可复制发回');
+if(ws&&ws.readyState===1)ws.send(JSON.stringify({type:'answer',room:currentRoom,sdp:pc.localDescription}));
+}
+};
+setTimeout(()=>{
+if(!modalJoinAnswer.value){
+modalJoinAnswer.value=JSON.stringify(pc.localDescription);
+modalCopyJoin.disabled=modalFinishJoin.disabled=false;
+log('Answer 已就绪');
+if(ws&&ws.readyState===1)ws.send(JSON.stringify({type:'answer',room:currentRoom,sdp:pc.localDescription}));
+}
+},1200);
+}catch(e){alert('解析 Offer 失败: '+e.message)}
+});
+modalFinishJoin.addEventListener('click',()=>{
+initModal.style.display='none';
+log('已确认连通，进入会议');
+});
+sigConnectBtn.addEventListener('click',()=>{
+const url=signalingUrl.value.trim();
+if(!url.startsWith('ws://')&&!url.startsWith('wss://')){
+alert('请输入有效的 ws:// 或 wss:// 地址');
+return;
+}
+saveUrl();
+const room=roomInput.value.trim();
+if(!room||room.length<2){
+alert('请输入房间号（至少2位）');
+return;
+}
+resetPeer();
+currentRoom=room;
+offerHandled=false;
+sigConnectBtn.disabled=true;
+sigConnectBtn.textContent='连接中...';
+ws=new WebSocket(url);
+ws.onopen=()=>{
+log('信令服务器已连接');
+startSignalingKeepAlive();
+if(role==='host'){
+ws.send(JSON.stringify({type:'create',room:currentRoom}));
+log('正在创建房间: '+currentRoom);
+}else{
+ws.send(JSON.stringify({type:'join',room:currentRoom}));
+log('正在加入房间: '+currentRoom);
+initJoinPeer();
+}
+};
+ws.onmessage=async e=>{
+try{
+const m=JSON.parse(e.data);
+if(m.type==='error'){
+alert(m.message||'信令错误');
+sigConnectBtn.disabled=false;
+sigConnectBtn.textContent='连接信令并开始';
+return;
+}
+if(m.type==='room-created'){
+log('房间创建成功: '+m.room);
+waitingRoomCode.textContent=m.room;
+waitingArea.classList.remove('step-hidden');
+sigConnectBtn.textContent='等待对方加入中...';
+initHostPeer();
+}
+if(m.type==='joined'){
+log('成功加入房间: '+m.room);
+}
+if(m.type==='offer'&&role==='join'&&!offerHandled){
+if(!pc)createJoinPeerConnection();
+if(pc.signalingState!=='stable'){
+log('忽略重复 Offer，当前状态: '+pc.signalingState);
+return;
+}
+offerHandled=true;
+log('收到 Offer，开始生成 Answer');
+await pc.setRemoteDescription(new RTCSessionDescription(m.sdp));
+bindJoinTransceivers();
+const a=await pc.createAnswer();
+await pc.setLocalDescription(a);
+let g=false;
+pc.onicecandidate=ev=>{
+if(!ev.candidate&&!g){
+g=true;
+ws.send(JSON.stringify({type:'answer',room:currentRoom,sdp:pc.localDescription}));
+log('Answer 已通过信令发送');
+initModal.style.display='none';
+statusEl.textContent='通话中';
+}
+};
+setTimeout(()=>{
+if(pc.localDescription){
+ws.send(JSON.stringify({type:'answer',room:currentRoom,sdp:pc.localDescription}));
+initModal.style.display='none';
+statusEl.textContent='通话中';
+}
+},1200);
+}else if(m.type==='answer'&&role==='host'){
+if(pc.signalingState!=='have-local-offer'){
+log('忽略 Answer，当前状态: '+pc.signalingState);
+return;
+}
+await pc.setRemoteDescription(new RTCSessionDescription(m.sdp));
+log('Answer 已通过信令接收，对方已加入，进入会议');
+initModal.style.display='none';
+statusEl.textContent='通话中';
+}else if(m.type==='candidate'&&pc){
+try{await pc.addIceCandidate(m.candidate)}catch{}
+}else if(m.type==='peer-left'){
+log('对方已离开房间');
+returnToWizard();
+}
+}catch(err){log('信令消息处理失败: '+err.message)}
+};
+ws.onerror=()=>{
+log('信令连接错误');
+sigConnectBtn.disabled=false;
+sigConnectBtn.textContent='连接信令并开始';
+};
+ws.onclose=()=>{
+log('信令连接已关闭');
+if(keepAliveTimer){clearInterval(keepAliveTimer);keepAliveTimer=null}
+if(initModal.style.display!=='none'){
+sigConnectBtn.disabled=false;
+sigConnectBtn.textContent='连接信令并开始';
+}else{
+scheduleDisconnect('信令断开');
+}
+};
+});
+document.addEventListener('visibilitychange',()=>{
+if(document.hidden){
+log('页面进入后台');
+}else{
+log('页面回到前台');
+if(dataChannel&&dataChannel.readyState==='open'){
+try{dataChannel.send(JSON.stringify({type:'hb',t:Date.now()}))}catch{}
+}
+if(ws&&ws.readyState===1&&currentRoom){
+try{ws.send(JSON.stringify({type:'ping',room:currentRoom}))}catch{}
+}
+if(pc&&(pc.connectionState==='disconnected'||pc.iceConnectionState==='disconnected')){
+tryIceRestart();
+}
+cancelDisconnectTimer();
+}
+});
+window.addEventListener('pagehide',()=>{
+if(dataChannel&&dataChannel.readyState==='open'){
+try{dataChannel.send(JSON.stringify({type:'hb',t:Date.now()}))}catch{}
+}
+if(ws&&ws.readyState===1&&currentRoom){
+try{ws.send(JSON.stringify({type:'ping',room:currentRoom}))}catch{}
+}
+});
+loadSavedUrl();
+initJoinPeer();
+updateModeUI();
 </script>
 </body>
 </html>
