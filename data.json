@@ -1,0 +1,19 @@
+[
+    {
+        "title": "WebRTC 推文",
+        "type": "推文",
+        "link": "web/1",
+        "thumbnail": "web/1/logo.png"
+    },
+     {
+        "title": "WebRTC 会议",
+        "type": "会议",
+        "link": "web/2",
+        "thumbnail": "web/2/logo.jpg"
+    }
+]
+
+
+
+
+

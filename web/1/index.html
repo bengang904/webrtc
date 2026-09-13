@@ -1,0 +1,467 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
+<title>WebRTCX v1.5</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+<style>
+:root{--tw-blue:#00aced;--tw-blue-dark:#0084b4;--tw-blue-light:#c0deed;--tw-bg:#c0deed}
+*{box-sizing:border-box}
+body{margin:0;padding:0;font-family:"Helvetica Neue",Helvetica,Arial,sans-serif;background:var(--tw-bg);color:#333;min-height:100vh;font-size:14px;line-height:1.4}
+.modal-overlay{position:fixed;inset:0;background:rgba(0,0,0,.55);display:flex;align-items:center;justify-content:center;z-index:1000}
+.modal-card{background:#fff;border-radius:6px;width:92%;max-width:460px;padding:24px;box-shadow:0 4px 20px rgba(0,0,0,.25);max-height:90vh;overflow-y:auto}
+.modal-title{font-size:20px;font-weight:bold;color:#292f33;text-align:center;margin-bottom:16px}
+.panel-title{font-size:12px;font-weight:bold;color:#66757f;text-transform:uppercase;margin:12px 0 6px;letter-spacing:.3px}
+.role-selector{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:8px}
+.role-pill{background:#f5f8fa;border:1px solid #e1e8ed;border-radius:4px;padding:10px;text-align:center;cursor:pointer;color:#66757f;font-weight:500}
+.role-pill.active{background:#e8f5fd;border-color:var(--tw-blue);color:var(--tw-blue-dark)}
+.sig-input,select.mode-select,textarea{width:100%;border:1px solid #ccd6dd;border-radius:4px;padding:8px 10px;font-size:13px;outline:none;background:#fff}
+.sig-input:focus,select.mode-select:focus,textarea:focus{border-color:var(--tw-blue)}
+textarea{height:70px;font-family:monospace;font-size:12px;resize:vertical}
+.btn{background:var(--tw-blue);color:#fff;border:none;border-radius:4px;padding:10px 14px;font-size:14px;font-weight:bold;cursor:pointer;width:100%;margin-top:10px}
+.btn:hover{background:var(--tw-blue-dark)}
+.btn:disabled{background:#aab8c2;cursor:not-allowed}
+.btn-sec{background:#8899a6}
+.btn-sec:hover{background:#66757f}
+.btn-danger{background:#e0245e}
+.btn-danger:hover{background:#c01e4e}
+.btn-row{display:grid;grid-template-columns:1fr 1fr 1fr;gap:6px;margin-top:8px}
+.btn-row .btn{margin-top:0;padding:8px 6px;font-size:12px}
+.step-hidden{display:none!important}
+.waiting-box{text-align:center;padding:16px;background:#e8f5fd;border-radius:6px;margin-top:12px;border:1px solid var(--tw-blue-light)}
+.waiting-box .room-show{font-size:22px;font-weight:bold;letter-spacing:3px;color:#292f33;margin:8px 0}
+.waiting-box .tip{font-size:13px;color:#66757f}
+.spinner{display:inline-block;width:16px;height:16px;border:2px solid rgba(0,172,237,.3);border-top-color:var(--tw-blue);border-radius:50%;animation:spin .7s linear infinite;margin-right:6px;vertical-align:middle}
+@keyframes spin{to{transform:rotate(360deg)}}
+.app{display:none;min-height:100vh;flex-direction:column}
+.app.visible{display:flex}
+.tw-header{background:#fff;border-bottom:1px solid #e1e8ed;height:46px;display:flex;align-items:center;justify-content:space-between;padding:0 16px;position:sticky;top:0;z-index:50;box-shadow:0 1px 3px rgba(0,0,0,.08)}
+.tw-logo{display:flex;align-items:center;gap:8px;font-weight:bold;font-size:18px;color:var(--tw-blue)}
+.tw-logo svg{width:28px;height:28px;fill:var(--tw-blue)}
+.header-right{display:flex;align-items:center;gap:12px;font-size:13px;color:#66757f}
+.status-pill{font-size:11px;padding:2px 8px;background:#e8f5fd;color:var(--tw-blue-dark);border-radius:10px;font-weight:600}
+.main-wrap{max-width:600px;width:100%;margin:0 auto;padding:12px 10px 48px;flex:1}
+@media(min-width:900px){.main-wrap{max-width:920px;display:grid;grid-template-columns:300px 1fr;gap:20px;align-items:start;padding:16px 12px 40px}}
+.profile-card{background:#fff;border-radius:6px;border:1px solid #e1e8ed;overflow:hidden;margin-bottom:12px}
+.profile-banner{height:96px;background:linear-gradient(135deg,#00aced,#1da1f2 50%,#0084b4)}
+.profile-body{padding:12px 14px 14px;position:relative}
+.avatar-lg{width:72px;height:72px;border-radius:8px;background:#ccd6dd;border:3px solid #fff;margin-top:-40px;display:flex;align-items:center;justify-content:center;font-size:28px;color:#66757f;font-weight:bold;overflow:hidden;cursor:pointer;position:relative}
+.avatar-lg img{width:100%;height:100%;object-fit:cover}
+.avatar-lg:hover::after{content:'换头像';position:absolute;inset:0;background:rgba(0,0,0,.45);color:#fff;font-size:10px;display:flex;align-items:center;justify-content:center}
+.profile-name{font-size:18px;font-weight:bold;margin-top:8px;color:#292f33;display:flex;align-items:center;gap:6px;flex-wrap:wrap}
+.admin-badge{font-size:10px;background:var(--tw-blue);color:#fff;padding:1px 6px;border-radius:3px;font-weight:bold;letter-spacing:.3px}
+.profile-handle{color:#8899a6;font-size:13px}
+.profile-bio{margin-top:8px;font-size:13px;color:#292f33;line-height:1.45;word-break:break-word;min-height:18px}
+.profile-bio.empty{color:#8899a6}
+.bio-edit{margin-top:6px;display:none}
+.bio-edit.show{display:block}
+.bio-edit textarea{width:100%;border:1px solid #ccd6dd;border-radius:4px;padding:6px 8px;font-size:13px;font-family:inherit;resize:none;height:52px;outline:none}
+.bio-edit textarea:focus{border-color:var(--tw-blue)}
+.bio-edit .bio-actions{display:flex;gap:6px;margin-top:6px;justify-content:flex-end}
+.bio-edit .bio-actions button{border:none;border-radius:14px;padding:4px 12px;font-size:12px;font-weight:bold;cursor:pointer}
+.bio-save{background:var(--tw-blue);color:#fff}
+.bio-cancel{background:#e1e8ed;color:#66757f}
+.edit-bio-btn{margin-top:6px;font-size:12px;color:var(--tw-blue);background:none;border:none;cursor:pointer;padding:0;font-family:inherit}
+.edit-bio-btn:hover{text-decoration:underline}
+.profile-stats{display:flex;gap:14px;margin-top:12px;font-size:13px;flex-wrap:wrap}
+.profile-stats strong{color:#292f33}
+.profile-stats span{color:#8899a6}
+.profile-stats .stat-btn{cursor:pointer;background:none;border:none;padding:0;font-family:inherit;font-size:13px;color:inherit}
+.profile-stats .stat-btn:hover strong{color:var(--tw-blue)}
+.profile-tabs{display:flex;border-top:1px solid #e1e8ed;margin-top:12px}
+.profile-tab{flex:1;text-align:center;padding:10px 4px;font-size:13px;font-weight:bold;color:#8899a6;cursor:pointer;border-bottom:2px solid transparent;background:none;border-top:none;border-left:none;border-right:none;font-family:inherit}
+.profile-tab.active{color:var(--tw-blue);border-bottom-color:var(--tw-blue)}
+.profile-tab:hover{background:#f5f8fa}
+.compose-box{background:#fff;border:1px solid #e1e8ed;border-radius:6px;padding:12px 14px;margin-bottom:16px}
+.compose-box textarea{width:100%;border:none;resize:none;height:70px;font-size:15px;font-family:inherit;outline:none;color:#292f33}
+.compose-actions{display:flex;align-items:center;justify-content:space-between;border-top:1px solid #e1e8ed;padding-top:10px;margin-top:6px}
+.compose-left{display:flex;align-items:center;gap:10px}
+.icon-btn{background:none;border:none;color:var(--tw-blue);cursor:pointer;width:32px;height:32px;border-radius:4px;display:flex;align-items:center;justify-content:center}
+.icon-btn:hover{background:#e8f5fd}
+.icon-btn svg{width:20px;height:20px;fill:currentColor}
+.char-count{font-size:13px;color:#8899a6}
+.char-count.warn{color:#e0245e}
+.tweet-btn{background:var(--tw-blue);color:#fff;border:none;border-radius:20px;padding:7px 18px;font-size:13px;font-weight:bold;cursor:pointer}
+.tweet-btn:hover{background:var(--tw-blue-dark)}
+.tweet-btn:disabled{background:#aab8c2;cursor:not-allowed}
+.media-preview{margin-top:8px;display:none}
+.media-preview.show{display:block}
+.p-rm{position:absolute;top:6px;right:6px;width:24px;height:24px;border-radius:50%;background:rgba(15,20,25,.65);color:#fff;border:none;cursor:pointer;font-size:15px;line-height:22px;padding:0;z-index:2}
+.media-grid{display:grid;gap:2px;margin-top:8px;border-radius:12px;overflow:hidden;border:1px solid #e1e8ed;background:#e1e8ed;width:100%}
+.media-grid.n1{grid-template-columns:1fr;min-height:180px}
+.media-grid.n2{grid-template-columns:1fr 1fr;aspect-ratio:16/9}
+.media-grid.n3{grid-template-columns:1.15fr 1fr;grid-template-rows:1fr 1fr;aspect-ratio:4/3}
+.media-grid.n3 .m-cell:nth-child(1){grid-row:1/3}
+.media-grid.n4{grid-template-columns:1fr 1fr;grid-template-rows:1fr 1fr;aspect-ratio:1/1}
+.m-cell{position:relative;cursor:pointer;background:#cfd9de;overflow:hidden;min-height:0}
+.m-cell img{width:100%;height:100%;display:block;object-fit:cover;object-position:center;filter:blur(12px);transition:filter .4s ease,opacity .4s ease;opacity:.6}
+.m-cell img.loaded{filter:none;opacity:1}
+.media-grid.n1{background:#000;border-color:#000}
+.media-grid.n1 .m-cell{background:#000;display:flex;align-items:center;justify-content:center;max-height:min(75vh,560px);min-height:180px}
+.media-grid.n1 .m-cell img{object-fit:contain;width:auto;height:auto;max-width:100%;max-height:min(75vh,560px)}
+.media-grid.n2 .m-cell,.media-grid.n3 .m-cell,.media-grid.n4 .m-cell{height:100%}
+.m-cell.pending::after{content:'';position:absolute;inset:0;background:linear-gradient(90deg,#e1e8ed,#f5f8fa,#e1e8ed);background-size:200% 100%;animation:shimmer 1.2s linear infinite}
+@keyframes shimmer{to{background-position:-200% 0}}
+.media-grid.is-preview{max-width:100%}
+.media-grid.is-preview.n1 .m-cell{max-height:240px;min-height:120px}
+.media-grid.is-preview.n1 .m-cell img{max-height:240px}
+.media-grid.is-preview.n2{aspect-ratio:16/9}
+.media-grid.is-preview.n3{aspect-ratio:4/3}
+.media-grid.is-preview.n4{aspect-ratio:1/1}
+.media-grid.is-preview .m-cell{cursor:default}
+.lightbox{position:fixed;inset:0;background:rgba(0,0,0,.92);z-index:2000;display:none;align-items:center;justify-content:center;flex-direction:column}
+.lightbox.show{display:flex}
+.lightbox img{max-width:94vw;max-height:82vh;object-fit:contain;border-radius:4px}
+.lb-close{position:absolute;top:12px;right:16px;background:none;border:none;color:#fff;font-size:28px;cursor:pointer;z-index:2}
+.lb-nav{position:absolute;top:50%;transform:translateY(-50%);background:rgba(255,255,255,.15);border:none;color:#fff;width:40px;height:40px;border-radius:50%;cursor:pointer;font-size:20px}
+.lb-prev{left:12px}
+.lb-next{right:12px}
+.lb-counter{color:#8899a6;margin-top:10px;font-size:13px}
+.timeline{background:#fff;border:1px solid #e1e8ed;border-radius:6px;overflow:hidden}
+.timeline-header{padding:12px 16px;font-weight:bold;font-size:16px;color:#292f33;border-bottom:1px solid #e1e8ed;background:#f5f8fa}
+.tweet{display:flex;gap:12px;padding:12px 16px;border-bottom:1px solid #e1e8ed;transition:background .15s}
+.tweet:hover{background:#f5f8fa}
+.tweet:last-child{border-bottom:none}
+.tweet-avatar{width:48px;height:48px;border-radius:6px;background:#ccd6dd;flex-shrink:0;display:flex;align-items:center;justify-content:center;font-size:20px;font-weight:bold;color:#66757f;overflow:hidden}
+.tweet-avatar img{width:100%;height:100%;object-fit:cover}
+.tweet-body{flex:1;min-width:0}
+.tweet-meta{font-size:13px;margin-bottom:2px}
+.tweet-name{font-weight:bold;color:#292f33}
+.tweet-handle,.tweet-time{color:#8899a6}
+.tweet-admin{font-size:10px;background:var(--tw-blue);color:#fff;padding:0 4px;border-radius:2px;margin-left:4px;vertical-align:middle}
+.tweet-text{font-size:14px;color:#292f33;word-break:break-word;white-space:pre-wrap;margin:4px 0 6px}
+.tweet-actions{display:flex;gap:18px;margin-top:6px;align-items:center}
+.tweet-action{font-size:12px;color:#8899a6;cursor:pointer;background:none;border:none;padding:0;display:inline-flex;align-items:center;gap:4px;font-family:inherit}
+.tweet-action:hover{color:var(--tw-blue)}
+.tweet-action svg{width:16px;height:16px;fill:currentColor}
+.tweet-action.liked{color:#e0245e}
+.tweet-action.liked svg{fill:#e0245e}
+.tweet-action.faved{color:#ffad1f}
+.tweet-action.faved svg{fill:#ffad1f}
+.tweet-del{font-size:12px;color:#e0245e;cursor:pointer;background:none;border:none;padding:0}
+.tweet-del:hover{text-decoration:underline}
+.reply-box{margin-top:8px;padding:8px;background:#f5f8fa;border-radius:6px;border:1px solid #e1e8ed;display:none}
+.reply-box.show{display:block}
+.reply-box textarea{width:100%;border:1px solid #ccd6dd;border-radius:4px;padding:8px;font-size:13px;font-family:inherit;resize:none;height:56px;outline:none}
+.reply-box textarea:focus{border-color:var(--tw-blue)}
+.reply-box .reply-actions{display:flex;justify-content:flex-end;gap:8px;margin-top:6px}
+.reply-box .reply-actions button{border:none;border-radius:16px;padding:5px 14px;font-size:12px;font-weight:bold;cursor:pointer}
+.reply-cancel{background:#e1e8ed;color:#66757f}
+.reply-send{background:var(--tw-blue);color:#fff}
+.reply-thread{margin-top:8px;padding-left:12px;border-left:2px solid #e1e8ed}
+.reply-item{font-size:13px;padding:6px 0;color:#292f33}
+.reply-item .r-meta{color:#8899a6;font-size:12px;margin-bottom:2px}
+.empty-timeline{padding:40px 20px;text-align:center;color:#8899a6;font-size:14px}
+.log-bar{position:fixed;bottom:0;left:0;right:0;background:#292f33;color:#8899a6;font-size:11px;font-family:monospace;padding:4px 12px;max-height:60px;overflow-y:auto;display:none;z-index:60}
+.log-bar.show{display:block}
+@media(max-width:600px){
+body{font-size:13px}
+.tw-header{height:44px;padding:0 10px}
+.tw-logo span{font-size:16px}
+.tw-logo svg{width:24px;height:24px}
+.main-wrap{padding:8px 6px 56px}
+.profile-banner{height:72px}
+.avatar-lg{width:56px;height:56px;margin-top:-32px;font-size:22px}
+.profile-name{font-size:16px}
+.compose-box{padding:10px;margin-bottom:10px}
+.compose-box textarea{height:56px;font-size:14px}
+.tweet{padding:10px 12px;gap:10px}
+.tweet-avatar{width:40px;height:40px;font-size:16px}
+.tweet-actions{gap:12px;flex-wrap:wrap}
+.modal-card{width:96%;padding:16px;max-height:95vh}
+.btn-row{grid-template-columns:1fr;gap:6px}
+.profile-tabs{margin-top:8px}
+.timeline-header{padding:10px 12px;font-size:15px}
+.media-grid.n1,.media-grid.n1 .m-cell{min-height:140px}
+.media-grid.is-preview.n1 .m-cell{min-height:100px}
+}
+</style>
+</head>
+<body>
+<div class="modal-overlay" id="initModal">
+<div class="modal-card">
+<div class="modal-title">WebRTCX v1.5</div>
+<div class="panel-title">连接模式</div>
+<select class="mode-select" id="connMode">
+<option value="signaling">使用信令服务器</option>
+<option value="manual">手动交换 SDP</option>
+</select>
+<div class="role-selector" style="margin-top:10px">
+<div class="role-pill" id="modalHostBtn">房主 (Offer)</div>
+<div class="role-pill active" id="modalJoinBtn">加入 (Answer)</div>
+</div>
+<div class="panel-title">你的显示名称</div>
+<input class="sig-input" id="displayName" placeholder="例如 Alice" maxlength="20">
+<div id="hostDataPanel" class="step-hidden">
+<div class="panel-title">房主数据管理（加入前）</div>
+<div class="btn-row">
+<button class="btn btn-sec" id="exportZipBtn" type="button">导出 ZIP</button>
+<button class="btn btn-danger" id="clearDataBtn" type="button">清空数据</button>
+<button class="btn btn-sec" id="importZipBtn" type="button">导入 ZIP</button>
+</div>
+<input type="file" id="importZipInput" accept=".zip,application/zip" style="display:none">
+<button class="btn" id="soloEnterBtn" type="button" style="margin-top:10px;background:#c0deed;color:#0084b4">单人模式进入</button>
+<div class="tip" style="font-size:12px;color:#8899a6;margin-top:6px;text-align:center">本地使用，无需对方连接，数据仅存本机</div>
+</div>
+<div id="signalingSection">
+<div class="panel-title">信令服务器地址 (ws:// 或 wss://)</div>
+<input class="sig-input" id="signalingUrl" placeholder="ws://localhost:8080 或 wss://your-server.com">
+<div class="panel-title" id="roomLabel">输入房间号</div>
+<input class="sig-input" id="roomInput" placeholder="自己定义或填写对方房间号" maxlength="16">
+<button class="btn" id="sigConnectBtn">连接信令并开始</button>
+<div id="waitingArea" class="step-hidden">
+<div class="waiting-box">
+<div><span class="spinner"></span>正在等待对方加入...</div>
+<div class="room-show" id="waitingRoomCode">----</div>
+<div class="tip">把房间号发给对方，仅支持两人同时连接</div>
+</div>
+</div>
+</div>
+<div id="manualSection" class="step-hidden">
+<div id="modalHostSection" class="step-hidden">
+<div class="panel-title">1. 复制本端 Offer 发给对方</div>
+<textarea id="modalHostSdp" placeholder="生成中..." readonly></textarea>
+<button class="btn btn-sec" id="modalCopyHost">复制 Offer</button>
+<div class="panel-title">2. 粘贴对方的 Answer 并建立连接</div>
+<textarea id="modalHostAnswer" placeholder="在此粘贴 Answer..."></textarea>
+<button class="btn" id="modalApplyAnswer" disabled>验证并进入</button>
+</div>
+<div id="modalJoinSection">
+<div class="panel-title">1. 粘贴对方的 Offer</div>
+<textarea id="modalJoinOffer" placeholder="在此粘贴 Offer..."></textarea>
+<button class="btn" id="modalApplyOffer" disabled>生成 Answer</button>
+<div class="panel-title">2. 复制生成的 Answer 发回给对方</div>
+<textarea id="modalJoinAnswer" placeholder="等待生成..." readonly></textarea>
+<button class="btn btn-sec" id="modalCopyJoin" disabled>复制 Answer</button>
+<button class="btn" id="modalFinishJoin" disabled>确认连通并进入</button>
+</div>
+</div>
+</div>
+</div>
+<div class="app" id="app">
+<header class="tw-header">
+<div class="tw-logo">
+<svg viewBox="0 0 24 24"><path d="M23.643 4.937c-.835.37-1.732.62-2.675.733.962-.576 1.7-1.49 2.048-2.578-.9.534-1.897.922-2.958 1.13-.85-.904-2.06-1.47-3.4-1.47-2.572 0-4.658 2.086-4.658 4.66 0 .364.042.718.12 1.06-3.873-.195-7.304-2.05-9.602-4.868-.4.69-.63 1.49-.63 2.342 0 1.616.823 3.043 2.072 3.878-.764-.025-1.482-.234-2.11-.583v.06c0 2.257 1.605 4.14 3.737 4.568-.392.106-.803.162-1.227.162-.3 0-.593-.028-.877-.082.593 1.85 2.313 3.198 4.352 3.234-1.595 1.25-3.604 1.995-5.786 1.995-.376 0-.747-.022-1.112-.065 2.062 1.323 4.51 2.093 7.14 2.093 8.57 0 13.255-7.098 13.255-13.254 0-.2-.005-.402-.014-.602.91-.658 1.7-1.477 2.323-2.41z"/></svg>
+<span>WebRTC X</span>
+</div>
+<div class="header-right">
+<span id="myNameLabel">@me</span>
+<div class="status-pill" id="status">就绪</div>
+<button class="icon-btn" id="toggleLogBtn" title="日志" style="color:#8899a6">☰</button>
+</div>
+</header>
+<div class="main-wrap">
+<aside>
+<div class="profile-card">
+<div class="profile-banner"></div>
+<div class="profile-body">
+<div class="avatar-lg" id="myAvatar" title="点击更换头像">?</div>
+<input type="file" id="avatarInput" accept="image/*" style="display:none">
+<div class="profile-name"><span id="profileName">Guest</span><span class="admin-badge step-hidden" id="adminBadge">管理员</span></div>
+<div class="profile-handle" id="profileHandle">@guest</div>
+<div class="profile-bio empty" id="profileBio">点击下方添加个性签名</div>
+<button type="button" class="edit-bio-btn" id="editBioBtn">编辑签名</button>
+<div class="bio-edit" id="bioEdit">
+<textarea id="bioInput" maxlength="160" placeholder="介绍一下自己（最多160字）"></textarea>
+<div class="bio-actions">
+<button type="button" class="bio-cancel" id="bioCancelBtn">取消</button>
+<button type="button" class="bio-save" id="bioSaveBtn">保存</button>
+</div>
+</div>
+<div class="profile-stats">
+<button type="button" class="stat-btn" id="statAllBtn"><strong id="tweetCount">0</strong> <span>推文</span></button>
+<button type="button" class="stat-btn" id="statMineBtn"><strong id="myPostCount">0</strong> <span>我的</span></button>
+<button type="button" class="stat-btn" id="statFavBtn"><strong id="favCount">0</strong> <span>收藏</span></button>
+<div><strong id="peerStatus">离线</strong> <span>对方</span></div>
+</div>
+<div class="profile-tabs">
+<button type="button" class="profile-tab active" data-view="all">时间线</button>
+<button type="button" class="profile-tab" data-view="mine">我的推文</button>
+<button type="button" class="profile-tab" data-view="favs">收藏</button>
+</div>
+</div>
+</div>
+</aside>
+<main>
+<div class="compose-box">
+<textarea id="composeText" placeholder="有什么新鲜事？" maxlength="280"></textarea>
+<div class="media-preview" id="mediaPreview">
+<div class="media-grid is-preview" id="previewGrid"></div>
+</div>
+<div class="compose-actions">
+<div class="compose-left">
+<button class="icon-btn" id="imgBtn" title="添加图片(最多4张)">
+<svg viewBox="0 0 24 24"><path d="M19.75 2H4.25C3.01 2 2 3.01 2 4.25v15.5C2 20.99 3.01 22 4.25 22h15.5c1.24 0 2.25-1.01 2.25-2.25V4.25C22 3.01 20.99 2 19.75 2zM4.25 3.5h15.5c.413 0 .75.337.75.75v9.676l-3.859-3.859c-.14-.14-.33-.22-.53-.22h-.003c-.2 0-.393.08-.532.224l-4.359 4.475-1.89-1.89c-.14-.14-.33-.22-.53-.22-.19-.01-.39.08-.53.23L3.5 17.576V4.25c0-.413.337-.75.75-.75zm-.002 16.5v-2.318l3.373-3.466 1.89 1.89c.28.28.73.28 1.01 0l4.37-4.48 4.36 4.36v3.014c0 .413-.337.75-.75.75H4.25c-.413 0-.75-.337-.75-.75z"/></svg>
+</button>
+<input type="file" id="imgInput" accept="image/*" multiple style="display:none">
+<span class="char-count" id="charCount">140</span>
+</div>
+<button class="tweet-btn" id="tweetBtn" disabled>发推</button>
+</div>
+</div>
+<div class="lightbox" id="lightbox">
+<button type="button" class="lb-close" id="lbClose">×</button>
+<button type="button" class="lb-nav lb-prev" id="lbPrev">‹</button>
+<button type="button" class="lb-nav lb-next" id="lbNext">›</button>
+<img id="lbImg" alt="" style="display:none">
+<div class="lb-counter" id="lbCounter"></div>
+</div>
+<div class="timeline">
+<div class="timeline-header">时间线</div>
+<div id="timelineList"><div class="empty-timeline">连接后即可发推。房主会把全部推文存入本地 IndexedDB。</div></div>
+</div>
+</main>
+</div>
+</div>
+<div class="log-bar" id="logBar"></div>
+<script>
+const $=id=>document.getElementById(id);
+const statusEl=$('status'),initModal=$('initModal'),app=$('app');
+const modalHostBtn=$('modalHostBtn'),modalJoinBtn=$('modalJoinBtn');
+const modalHostSection=$('modalHostSection'),modalJoinSection=$('modalJoinSection');
+const modalHostSdp=$('modalHostSdp'),modalCopyHost=$('modalCopyHost');
+const modalHostAnswer=$('modalHostAnswer'),modalApplyAnswer=$('modalApplyAnswer');
+const modalJoinOffer=$('modalJoinOffer'),modalApplyOffer=$('modalApplyOffer');
+const modalJoinAnswer=$('modalJoinAnswer'),modalCopyJoin=$('modalCopyJoin'),modalFinishJoin=$('modalFinishJoin');
+const connMode=$('connMode'),signalingSection=$('signalingSection'),manualSection=$('manualSection');
+const signalingUrl=$('signalingUrl'),sigConnectBtn=$('sigConnectBtn'),roomInput=$('roomInput');
+const roomLabel=$('roomLabel'),waitingArea=$('waitingArea'),waitingRoomCode=$('waitingRoomCode');
+const displayNameInput=$('displayName'),hostDataPanel=$('hostDataPanel');
+const composeText=$('composeText'),tweetBtn=$('tweetBtn'),charCount=$('charCount');
+const imgBtn=$('imgBtn'),imgInput=$('imgInput');
+const mediaPreview=$('mediaPreview'),previewGrid=$('previewGrid');
+const lightbox=$('lightbox'),lbImg=$('lbImg'),lbCounter=$('lbCounter');
+const timelineList=$('timelineList'),logBar=$('logBar');
+const myNameLabel=$('myNameLabel'),profileName=$('profileName'),profileHandle=$('profileHandle');
+const myAvatar=$('myAvatar'),tweetCount=$('tweetCount'),peerStatus=$('peerStatus'),adminBadge=$('adminBadge');
+const avatarInput=$('avatarInput'),profileBio=$('profileBio'),editBioBtn=$('editBioBtn'),bioEdit=$('bioEdit');
+const bioInput=$('bioInput'),bioSaveBtn=$('bioSaveBtn'),bioCancelBtn=$('bioCancelBtn');
+const myPostCount=$('myPostCount'),favCount=$('favCount');
+let pc,dataChannel,ws,role='join',currentRoom='',offerHandled=false,returningToWizard=false;
+let keepAliveTimer=null,dcKeepAliveTimer=null,disconnectTimer=null,wakeLock=null,bgInterval=null;
+let myName='Guest',peerName='Peer',selectedImages=[],tweets=[];
+let soloMode=false;
+let myAvatarUrl=null,peerAvatarUrl=null,avatarMap={},myBio='',peerBio='',currentView='all';
+let lbList=[],lbIndex=0;
+const ICE_SERVERS={iceServers:[{urls:'stun:stun.l.google.com:19302'},{urls:'stun:stun1.l.google.com:19302'}]};
+const STORAGE_KEY='wx_signaling_url',DB_NAME='WebRTCX',DB_STORE='tweets',DB_META='meta';
+const CHUNK_SIZE=16*1024,BUFFER_THRESHOLD=256*1024,DISCONNECT_GRACE_MS=8000,MAX_CHARS=140;
+const pendingImageChunks=new Map();
+function log(m){console.log(m);const t=new Date().toLocaleTimeString();logBar.innerHTML+=`<div>[${t}] ${m}</div>`;logBar.scrollTop=logBar.scrollHeight}
+function loadSavedUrl(){const s=localStorage.getItem(STORAGE_KEY);if(s)signalingUrl.value=s}
+function saveUrl(){const u=signalingUrl.value.trim();if(u)localStorage.setItem(STORAGE_KEY,u)}
+function openDB(){return new Promise((resolve,reject)=>{const req=indexedDB.open(DB_NAME,2);req.onupgradeneeded=e=>{const db=e.target.result;if(!db.objectStoreNames.contains(DB_STORE)){const store=db.createObjectStore(DB_STORE,{keyPath:'id'});store.createIndex('ts','ts',{unique:false})}if(!db.objectStoreNames.contains(DB_META))db.createObjectStore(DB_META,{keyPath:'key'})};req.onsuccess=e=>resolve(e.target.result);req.onerror=e=>reject(e.target.error)})}
+async function saveTweetToDB(tweet){if(role!=='host')return;try{const db=await openDB();const tx=db.transaction(DB_STORE,'readwrite');tx.objectStore(DB_STORE).put(tweet);await new Promise((res,rej)=>{tx.oncomplete=res;tx.onerror=()=>rej(tx.error)})}catch(e){log('IDB err: '+e.message)}}
+async function deleteTweetFromDB(id){if(role!=='host')return;try{const db=await openDB();const tx=db.transaction(DB_STORE,'readwrite');tx.objectStore(DB_STORE).delete(id);await new Promise((res,rej)=>{tx.oncomplete=res;tx.onerror=()=>rej(tx.error)})}catch(e){log('IDB del err: '+e.message)}}
+async function loadTweetsFromDB(){try{const db=await openDB();const tx=db.transaction(DB_STORE,'readonly');const req=tx.objectStore(DB_STORE).index('ts').getAll();const list=await new Promise((res,rej)=>{req.onsuccess=()=>res(req.result||[]);req.onerror=()=>rej(req.error)});list.sort((a,b)=>b.ts-a.ts);return list}catch(e){log('IDB load err: '+e.message);return[]}}
+async function clearAllTweetsDB(){try{const db=await openDB();const tx=db.transaction([DB_STORE,DB_META],'readwrite');tx.objectStore(DB_STORE).clear();tx.objectStore(DB_META).clear();await new Promise((res,rej)=>{tx.oncomplete=res;tx.onerror=()=>rej(tx.error)});tweets=[];avatarMap={};myAvatarUrl=null;renderTimeline();setProfileUI();log('已清空全部数据')}catch(e){log('清空失败: '+e.message)}}
+async function saveMeta(key,value){if(role!=='host')return;try{const db=await openDB();const tx=db.transaction(DB_META,'readwrite');tx.objectStore(DB_META).put({key,value});await new Promise((res,rej)=>{tx.oncomplete=res;tx.onerror=()=>rej(tx.error)})}catch(e){log('meta save err: '+e.message)}}
+async function loadAllMeta(){try{const db=await openDB();const tx=db.transaction(DB_META,'readonly');const req=tx.objectStore(DB_META).getAll();const list=await new Promise((res,rej)=>{req.onsuccess=()=>res(req.result||[]);req.onerror=()=>rej(req.error)});const map={};list.forEach(r=>{map[r.key]=r.value});return map}catch{return{}}}
+async function exportZip(){try{const list=await loadTweetsFromDB();const meta=await loadAllMeta();const zip=new JSZip();zip.file('tweets.json',JSON.stringify(list));zip.file('meta.json',JSON.stringify(meta));const blob=await zip.generateAsync({type:'blob'});const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download='webrtcx-data-'+new Date().toISOString().slice(0,10)+'.zip';a.click();URL.revokeObjectURL(a.href);log('已导出 ZIP')}catch(e){alert('导出失败: '+e.message)}}
+async function importZip(file){try{const zip=await JSZip.loadAsync(file);const tweetsFile=zip.file('tweets.json');const metaFile=zip.file('meta.json');if(!tweetsFile){alert('ZIP 中缺少 tweets.json');return}const list=JSON.parse(await tweetsFile.async('string'));const meta=metaFile?JSON.parse(await metaFile.async('string')):{};const db=await openDB();const tx=db.transaction([DB_STORE,DB_META],'readwrite');tx.objectStore(DB_STORE).clear();tx.objectStore(DB_META).clear();list.forEach(t=>tx.objectStore(DB_STORE).put(t));Object.keys(meta).forEach(k=>tx.objectStore(DB_META).put({key:k,value:meta[k]}));await new Promise((res,rej)=>{tx.oncomplete=res;tx.onerror=()=>rej(tx.error)});tweets=list.sort((a,b)=>b.ts-a.ts);avatarMap={};Object.keys(meta).forEach(k=>{if(k.startsWith('avatar:'))avatarMap[k.slice(7)]=meta[k]});renderTimeline();log('已导入并覆盖 '+list.length+' 条');alert('导入成功，共 '+list.length+' 条推文')}catch(e){alert('导入失败: '+e.message)}}
+function hasMedia(){return selectedImages.length>0}
+function updateCharCount(){const left=MAX_CHARS-composeText.value.length;charCount.textContent=left;charCount.classList.toggle('warn',left<0);const canSend=soloMode||(dataChannel&&dataChannel.readyState==='open');tweetBtn.disabled=(!composeText.value.trim()&&!hasMedia())||left<0||!canSend}
+function normalizeImages(t){let arr=[];if(Array.isArray(t.images))arr=t.images.slice();else if(t.imageDataUrl)arr=[t.imageDataUrl];const n=Math.min(Math.max(t.imgCount||arr.length,arr.length),4);while(arr.length<n)arr.push(null);return arr.slice(0,n).map(x=>x||null)}
+function buildMediaGridHtml(imgs,opts){opts=opts||{};const n=Math.min(imgs.length,4);if(!n)return'';const cls='media-grid n'+n+(opts.preview?' is-preview':'');const cells=imgs.map((src,i)=>{if(!src)return`<div class="m-cell pending" data-lbi="${i}"></div>`;const rm=opts.preview?`<button type="button" class="p-rm" data-rmi="${i}">×</button>`:'';const lb=opts.tweetId?` data-lb="${escapeHtml(opts.tweetId)}" data-lbi="${i}"`:'';return`<div class="m-cell"${lb}>${rm}<img src="${src}" alt="" loading="lazy"></div>`}).join('');return`<div class="${cls}">${cells}</div>`}
+function renderComposePreview(){const g=$('previewGrid');if(!hasMedia()){mediaPreview.classList.remove('show');if(g){g.innerHTML='';g.className='media-grid is-preview'}return}mediaPreview.classList.add('show');const imgs=selectedImages.map(i=>i.dataUrl);const n=Math.min(imgs.length,4);if(g){g.style.display='';g.className='media-grid is-preview n'+n;g.innerHTML=imgs.map((src,i)=>`<div class="m-cell"><button type="button" class="p-rm" data-rmi="${i}">×</button><img src="${src}" alt=""></div>`).join('');g.querySelectorAll('[data-rmi]').forEach(b=>b.addEventListener('click',e=>{e.stopPropagation();selectedImages.splice(+b.getAttribute('data-rmi'),1);renderComposePreview();updateCharCount()}));g.querySelectorAll('.m-cell img').forEach(img=>{if(img.complete&&img.naturalWidth)img.classList.add('loaded');else img.onload=()=>img.classList.add('loaded')})}}
+function openLightbox(list,idx){lbList=list.filter(Boolean);lbIndex=Math.min(idx||0,lbList.length-1);if(lbIndex<0)lbIndex=0;showLbItem();lightbox.classList.add('show')}
+function showLbItem(){const item=lbList[lbIndex];if(!item)return;lbImg.style.display='block';lbImg.src=item.src;lbCounter.textContent=(lbIndex+1)+' / '+lbList.length;$('lbPrev').style.display=lbList.length>1?'':'none';$('lbNext').style.display=lbList.length>1?'':'none'}
+function mediaHtml(t){const imgs=normalizeImages(t);return buildMediaGridHtml(imgs,{tweetId:t.id})}
+function setProfileUI(){profileName.textContent=myName;profileHandle.textContent='@'+myName.toLowerCase().replace(/\s+/g,'');myNameLabel.textContent='@'+myName.toLowerCase().replace(/\s+/g,'');role==='host'?adminBadge.classList.remove('step-hidden'):adminBadge.classList.add('step-hidden');const url=myAvatarUrl||avatarMap[myName];if(url){myAvatar.innerHTML=`<img src="${url}" alt="">`}else{myAvatar.textContent=(myName[0]||'?').toUpperCase()}if(myBio){profileBio.textContent=myBio;profileBio.classList.remove('empty')}else{profileBio.textContent='点击下方添加个性签名';profileBio.classList.add('empty')}updateStatCounts()}
+function updateStatCounts(){tweetCount.textContent=tweets.length;myPostCount.textContent=tweets.filter(t=>t.author===myName).length;favCount.textContent=tweets.filter(t=>{ensureEng(t);return t.favs.includes(myName)}).length}
+function tweetMatchesView(t,v){if(v==='mine')return t.author===myName;if(v==='favs'){ensureEng(t);return t.favs.includes(myName)}return true}
+function applyViewFilter(){const nodes=timelineList.querySelectorAll('.tweet');let visible=0;nodes.forEach(node=>{const id=node.getAttribute('data-id');const t=tweets.find(x=>x.id===id);const show=t&&tweetMatchesView(t,currentView);node.style.display=show?'':'none';if(show)visible++});let empty=timelineList.querySelector('.empty-timeline');if(visible===0){const tip=currentView==='mine'?'你还没有发过推文':currentView==='favs'?'还没有收藏的推文':'还没有推文，来发第一条吧！';if(empty)empty.textContent=tip;else{const d=document.createElement('div');d.className='empty-timeline';d.textContent=tip;timelineList.appendChild(d)}}else if(empty)empty.remove();updateStatCounts()}
+function setView(v){currentView=v;document.querySelectorAll('.profile-tab').forEach(tab=>tab.classList.toggle('active',tab.getAttribute('data-view')===v));const nodes=timelineList.querySelectorAll('.tweet');if(nodes.length>0){applyViewFilter();return}renderTimeline()}
+function filteredTweets(){return tweets.filter(t=>tweetMatchesView(t,currentView))}
+function relativeTime(ts){const sec=Math.floor((Date.now()-ts)/1000);if(sec<60)return sec+'秒前';if(sec<3600)return Math.floor(sec/60)+'分钟前';if(sec<86400)return Math.floor(sec/3600)+'小时前';return new Date(ts).toLocaleDateString()}
+function escapeHtml(s){return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;')}
+function avatarHtml(author){const url=avatarMap[author]||(author===myName?myAvatarUrl:null)||(author===peerName?peerAvatarUrl:null);if(url)return`<img src="${url}" alt="">`;return escapeHtml((author[0]||'?').toUpperCase())}
+function canDeleteTweet(t){return role==='host'||t.author===myName}
+const ICON_REPLY='<svg viewBox="0 0 24 24"><path d="M14.046 2.242l-4.148-.01h-.002c-4.374 0-7.8 3.427-7.8 7.802 0 4.098 3.186 7.206 7.465 7.37v3.828c0 .108.044.286.12.403.142.225.384.347.632.347.138 0 .275-.038.402-.118.264-.168 6.473-4.14 8.088-5.506 1.902-1.61 3.04-3.97 3.043-6.312v-.017c-.006-4.367-3.43-7.787-7.8-7.788zm3.787 12.972c-1.134.96-4.862 3.405-6.772 4.643V16.67c0-.414-.335-.75-.75-.75h-.396c-3.66 0-6.318-2.476-6.318-5.886 0-3.534 2.768-6.302 6.3-6.302l4.147.01h.002c3.532 0 6.3 2.766 6.302 6.296-.003 1.91-.942 3.844-2.514 5.176z"/></svg>';
+const ICON_LIKE='<svg viewBox="0 0 24 24"><path d="M12 21.638h-.014C9.403 21.59 1.95 14.856 1.95 8.478c0-3.064 2.525-5.754 5.403-5.754 2.29 0 3.83 1.58 4.646 2.73.814-1.148 2.354-2.73 4.645-2.73 2.88 0 5.404 2.69 5.404 5.755 0 6.376-7.454 13.11-10.037 13.157H12z"/></svg>';
+const ICON_FAV='<svg viewBox="0 0 24 24"><path d="M12 17.27L18.18 21l-1.64-7.03L22 9.24l-7.19-.61L12 2 9.19 8.63 2 9.24l5.46 4.73L5.82 21z"/></svg>';
+function ensureEng(t){if(!t.likes)t.likes=[];if(!t.favs)t.favs=[];if(!t.replies)t.replies=[];return t}
+
+function renderTimeline(){updateStatCounts();const list=tweets;if(!list.length){const tip=currentView==='mine'?'你还没有发过推文':currentView==='favs'?'还没有收藏的推文':'还没有推文，来发第一条吧！';timelineList.innerHTML='<div class="empty-timeline">'+tip+'</div>';return}timelineList.innerHTML=list.map(t=>{ensureEng(t);const media=mediaHtml(t);const badge=t.isAdmin?'<span class="tweet-admin">管理员</span>':'';const delBtn=canDeleteTweet(t)?`<button class="tweet-del" data-del="${t.id}">删除</button>`:'';const liked=t.likes.includes(myName);const faved=t.favs.includes(myName);
+const repliesHtml=(t.replies&&t.replies.length)?`<div class="reply-thread">${t.replies.map(r=>`<div class="reply-item"><div class="r-meta"><strong>${escapeHtml(r.author)}</strong> · ${relativeTime(r.ts)}</div>${escapeHtml(r.text)}</div>`).join('')}</div>`:'';const hide=tweetMatchesView(t,currentView)?'':' style="display:none"';return`<div class="tweet" data-id="${t.id}" data-author="${escapeHtml(t.author)}"${hide}><div class="tweet-avatar">${avatarHtml(t.author)}</div><div class="tweet-body"><div class="tweet-meta"><span class="tweet-name">${escapeHtml(t.author)}</span>${badge}<span class="tweet-handle"> @${escapeHtml(t.handle)}</span><span class="tweet-time"> · ${relativeTime(t.ts)}</span></div><div class="tweet-text">${escapeHtml(t.text)}</div>${media}${repliesHtml}<div class="tweet-actions"><button class="tweet-action" data-reply="${t.id}" title="回复">${ICON_REPLY}<span>${t.replies.length||''}</span></button><button class="tweet-action${liked?' liked':''}" data-like="${t.id}" title="点赞">${ICON_LIKE}<span>${t.likes.length||''}</span></button><button class="tweet-action${faved?' faved':''}" data-fav="${t.id}" title="收藏">${ICON_FAV}<span>${t.favs.length||''}</span></button>${delBtn}</div><div class="reply-box" id="rb-${t.id}"><textarea placeholder="回复 @${escapeHtml(t.handle)}..." maxlength="140"></textarea><div class="reply-actions"><button class="reply-cancel" type="button" data-rcancel="${t.id}">取消</button><button class="reply-send" type="button" data-rsend="${t.id}">回复</button></div></div></div></div>`}).join('');
+timelineList.querySelectorAll('[data-del]').forEach(btn=>btn.addEventListener('click',()=>deleteTweet(btn.getAttribute('data-del'))));
+timelineList.querySelectorAll('[data-like]').forEach(btn=>btn.addEventListener('click',()=>toggleLike(btn.getAttribute('data-like'))));
+timelineList.querySelectorAll('[data-fav]').forEach(btn=>btn.addEventListener('click',()=>toggleFav(btn.getAttribute('data-fav'))));
+timelineList.querySelectorAll('[data-reply]').forEach(btn=>btn.addEventListener('click',()=>{const id=btn.getAttribute('data-reply');const box=$('rb-'+id);if(box){document.querySelectorAll('.reply-box.show').forEach(b=>{if(b!==box)b.classList.remove('show')});box.classList.toggle('show');if(box.classList.contains('show'))box.querySelector('textarea').focus()}}));
+timelineList.querySelectorAll('[data-rcancel]').forEach(btn=>btn.addEventListener('click',()=>{const box=$('rb-'+btn.getAttribute('data-rcancel'));if(box){box.classList.remove('show');box.querySelector('textarea').value=''}}));
+timelineList.querySelectorAll('[data-rsend]').forEach(btn=>btn.addEventListener('click',()=>sendReply(btn.getAttribute('data-rsend'))));
+timelineList.querySelectorAll('[data-lb]').forEach(cell=>cell.addEventListener('click',()=>{const tid=cell.getAttribute('data-lb');const t=tweets.find(x=>x.id===tid);if(!t)return;const imgs=normalizeImages(t).filter(Boolean);const clicked=+cell.getAttribute('data-lbi')||0;const full=normalizeImages(t);const src=full[clicked];const idx=Math.max(0,imgs.indexOf(src));openLightbox(imgs.map(s=>({type:'image',src:s})),idx)}));
+timelineList.querySelectorAll('.m-cell img').forEach(img=>{if(img.complete&&img.naturalWidth)img.classList.add('loaded');else img.onload=()=>img.classList.add('loaded')});
+applyViewFilter()}
+function addTweet(tweet,save=true){ensureEng(tweet);if(tweets.some(t=>t.id===tweet.id))return;tweets.unshift(tweet);tweets.sort((a,b)=>b.ts-a.ts);renderTimeline();if(save&&role==='host')saveTweetToDB(tweet)}
+async function persistTweet(t){if(role==='host')await saveTweetToDB(t)}
+function patchEngButtons(id){const t=tweets.find(x=>x.id===id);if(!t)return;ensureEng(t);const root=timelineList.querySelector('.tweet[data-id="'+CSS.escape(id)+'"]');if(!root){updateStatCounts();return}const likeBtn=root.querySelector('[data-like]');const favBtn=root.querySelector('[data-fav]');if(likeBtn){likeBtn.classList.toggle('liked',t.likes.includes(myName));const sp=likeBtn.querySelector('span');if(sp)sp.textContent=t.likes.length||''}if(favBtn){favBtn.classList.toggle('faved',t.favs.includes(myName));const sp=favBtn.querySelector('span');if(sp)sp.textContent=t.favs.length||''}updateStatCounts()}
+function patchTweetMedia(id){const t=tweets.find(x=>x.id===id);if(!t)return;const root=timelineList.querySelector('.tweet[data-id="'+CSS.escape(id)+'"]');if(!root){renderTimeline();return}const body=root.querySelector('.tweet-body');if(!body){renderTimeline();return}const oldMedia=body.querySelector('.media-grid');const newMediaHtml=mediaHtml(t);if(!newMediaHtml){if(oldMedia)oldMedia.remove();return}const tmp=document.createElement('div');tmp.innerHTML=newMediaHtml;const newMedia=tmp.firstElementChild;if(oldMedia){oldMedia.replaceWith(newMedia)}else{const textEl=body.querySelector('.tweet-text');if(textEl)textEl.after(newMedia);else body.insertBefore(newMedia,body.querySelector('.tweet-actions'))}newMedia.querySelectorAll('[data-lb]').forEach(cell=>cell.addEventListener('click',()=>{const tid=cell.getAttribute('data-lb');const tw=tweets.find(x=>x.id===tid);if(!tw)return;const imgs=normalizeImages(tw).filter(Boolean);const clicked=+cell.getAttribute('data-lbi')||0;const full=normalizeImages(tw);const src=full[clicked];const idx=Math.max(0,imgs.indexOf(src));openLightbox(imgs.map(s=>({type:'image',src:s})),idx)}));newMedia.querySelectorAll('.m-cell img').forEach(img=>{if(img.complete&&img.naturalWidth)img.classList.add('loaded');else img.onload=()=>img.classList.add('loaded')})}
+function toggleLike(id){const t=tweets.find(x=>x.id===id);if(!t)return;ensureEng(t);const i=t.likes.indexOf(myName);if(i>=0)t.likes.splice(i,1);else t.likes.push(myName);patchEngButtons(id);persistTweet(t);if(dataChannel&&dataChannel.readyState==='open')try{dataChannel.send(JSON.stringify({type:'eng',action:'like',id,name:myName,on:t.likes.includes(myName)}))}catch{}}
+function toggleFav(id){const t=tweets.find(x=>x.id===id);if(!t)return;ensureEng(t);const i=t.favs.indexOf(myName);if(i>=0)t.favs.splice(i,1);else t.favs.push(myName);patchEngButtons(id);persistTweet(t);if(currentView==='favs')applyViewFilter();if(dataChannel&&dataChannel.readyState==='open')try{dataChannel.send(JSON.stringify({type:'eng',action:'fav',id,name:myName,on:t.favs.includes(myName)}))}catch{}}
+function clearComposeMedia(){selectedImages=[];composeText.value='';try{imgInput.value=''}catch{}const g=$('previewGrid');if(g){g.innerHTML='';g.className='media-grid is-preview';g.style.display=''}if(mediaPreview)mediaPreview.classList.remove('show');updateCharCount()}
+function sendReply(id){const box=$('rb-'+id);if(!box)return;const text=box.querySelector('textarea').value.trim();if(!text)return;const t=tweets.find(x=>x.id===id);if(!t)return;ensureEng(t);const reply={id:crypto.randomUUID(),author:myName,text,ts:Date.now()};t.replies.push(reply);box.classList.remove('show');box.querySelector('textarea').value='';renderTimeline();persistTweet(t);if(dataChannel&&dataChannel.readyState==='open')try{dataChannel.send(JSON.stringify({type:'eng',action:'reply',id,reply}))}catch{};log('已回复')}
+async function deleteTweet(id){const t=tweets.find(x=>x.id===id);if(!t||!canDeleteTweet(t)){alert('无权删除此推文');return}if(!confirm('确定删除这条推文？'))return;tweets=tweets.filter(x=>x.id!==id);renderTimeline();if(role==='host')await deleteTweetFromDB(id);if(dataChannel&&dataChannel.readyState==='open'){try{dataChannel.send(JSON.stringify({type:'tweet-delete',id}))}catch{}}log('已删除 '+id.slice(0,8))}
+editBioBtn.addEventListener('click',()=>{bioInput.value=myBio;bioEdit.classList.add('show');editBioBtn.style.display='none'});
+bioCancelBtn.addEventListener('click',()=>{bioEdit.classList.remove('show');editBioBtn.style.display=''});
+bioSaveBtn.addEventListener('click',async()=>{myBio=bioInput.value.trim().slice(0,160);bioEdit.classList.remove('show');editBioBtn.style.display='';setProfileUI();if(role==='host')await saveMeta('bio:'+myName,myBio);if(dataChannel&&dataChannel.readyState==='open')try{dataChannel.send(JSON.stringify({type:'bio',name:myName,bio:myBio}))}catch{};log('签名已更新')});
+document.querySelectorAll('.profile-tab').forEach(tab=>tab.addEventListener('click',()=>setView(tab.getAttribute('data-view'))));
+$('statAllBtn').addEventListener('click',()=>setView('all'));
+$('statMineBtn').addEventListener('click',()=>setView('mine'));
+$('statFavBtn').addEventListener('click',()=>setView('favs'));
+imgBtn.addEventListener('click',()=>imgInput.click());
+imgInput.addEventListener('change',()=>{const files=[...imgInput.files];imgInput.value='';for(const f of files){if(!f.type.startsWith('image/'))continue;if(f.size>4*1024*1024){alert('单张图片请小于4MB');continue}if(selectedImages.length>=4){alert('最多4张图片');break}const reader=new FileReader();reader.onload=e=>{selectedImages.push({blob:f,dataUrl:e.target.result,mime:f.type,size:f.size});renderComposePreview();updateCharCount()};reader.readAsDataURL(f)}});
+$('lbClose').addEventListener('click',()=>{lightbox.classList.remove('show')});
+$('lbPrev').addEventListener('click',()=>{lbIndex=(lbIndex-1+lbList.length)%lbList.length;showLbItem()});
+$('lbNext').addEventListener('click',()=>{lbIndex=(lbIndex+1)%lbList.length;showLbItem()});
+lightbox.addEventListener('click',e=>{if(e.target===lightbox)$('lbClose').click()});
+composeText.addEventListener('input',updateCharCount);
+myAvatar.addEventListener('click',()=>{if(app.classList.contains('visible'))avatarInput.click()});
+avatarInput.addEventListener('change',()=>{const f=avatarInput.files[0];if(!f||!f.type.startsWith('image/'))return;if(f.size>2*1024*1024){alert('头像请小于2MB');return}const reader=new FileReader();reader.onload=async e=>{myAvatarUrl=e.target.result;avatarMap[myName]=myAvatarUrl;setProfileUI();renderTimeline();if(role==='host')await saveMeta('avatar:'+myName,myAvatarUrl);if(dataChannel&&dataChannel.readyState==='open'){try{dataChannel.send(JSON.stringify({type:'avatar',name:myName,dataUrl:myAvatarUrl}))}catch{}}log('头像已更新')};reader.readAsDataURL(f);avatarInput.value=''});
+tweetBtn.addEventListener('click',async()=>{const text=composeText.value.trim();if((!text&&!hasMedia())||(!soloMode&&(!dataChannel||dataChannel.readyState!=='open')))return;if(text.length>MAX_CHARS)return;const id=crypto.randomUUID();const handle=myName.toLowerCase().replace(/\s+/g,'');const images=selectedImages.map(i=>i.dataUrl);const placeholder=text||(images.length?'[图片]':'');const n=images.length;const tweet={id,author:myName,handle,text:placeholder,images:Array(n).fill(null),imgCount:n,imageDataUrl:null,ts:Date.now(),isLocal:true,isAdmin:role==='host',likes:[],favs:[],replies:[]};addTweet(tweet,true);if(n>0){requestAnimationFrame(()=>{tweet.images=images.slice();tweet.imageDataUrl=images[0]||null;patchTweetMedia(id);if(role==='host')saveTweetToDB(tweet)})}if(dataChannel&&dataChannel.readyState==='open'){dataChannel.send(JSON.stringify({type:'tweet',id,author:myName,handle,text:tweet.text,ts:tweet.ts,imgCount:n,isAdmin:role==='host'}));const toSendImgs=selectedImages.slice();clearComposeMedia();for(let i=0;i<toSendImgs.length;i++)await sendMediaChunks(id,'img'+i,toSendImgs[i],'image')}else{clearComposeMedia()}log('已发送')});
+function makeMediaId(tweetId,mediaKey){const base=String(tweetId).replace(/-/g,'').slice(0,32).padEnd(32,'0');const key=String(mediaKey).replace(/[^a-z0-9]/gi,'').toLowerCase().slice(0,4).padEnd(4,'0');return(base+key).slice(0,36)}
+async function sendMediaChunks(tweetId,mediaKey,media,kind){const buffer=await media.blob.arrayBuffer();const u8=new Uint8Array(buffer);const totalChunks=Math.ceil(u8.length/CHUNK_SIZE)||1;const mid=makeMediaId(tweetId,mediaKey);dataChannel.bufferedAmountLowThreshold=BUFFER_THRESHOLD;dataChannel.send(JSON.stringify({type:'media-meta',tweetId,mediaKey,mid,kind,totalChunks,mime:media.mime,size:media.size}));for(let i=0;i<totalChunks;i++){while(dataChannel.bufferedAmount>BUFFER_THRESHOLD)await new Promise(r=>{const h=()=>{dataChannel.removeEventListener('bufferedamountlow',h);r()};dataChannel.addEventListener('bufferedamountlow',h)});const chunkData=u8.subarray(i*CHUNK_SIZE,Math.min((i+1)*CHUNK_SIZE,u8.length));const packet=new Uint8Array(36+chunkData.length);for(let j=0;j<36;j++)packet[j]=mid.charCodeAt(j)||48;packet.set(chunkData,36);try{dataChannel.send(packet)}catch(e){log('媒体分片失败: '+e.message);return}}log('图片发送完成 '+mediaKey)}
+let historySyncing=false;
+async function sendHistoryToPeer(){if(role!=='host'||!dataChannel||dataChannel.readyState!=='open'||historySyncing)return;historySyncing=true;try{const light=tweets.map(t=>{const n=normalizeImages(t).filter(Boolean).length;return{id:t.id,author:t.author,handle:t.handle,text:t.text,ts:t.ts,imgCount:n,isAdmin:!!t.isAdmin,likes:t.likes||[],favs:t.favs||[],replies:t.replies||[]}});const BATCH=15;for(let i=0;i<light.length;i+=BATCH){const slice=light.slice(i,i+BATCH);dataChannel.send(JSON.stringify({type:'timeline-sync',tweets:slice,part:Math.floor(i/BATCH),done:i+BATCH>=light.length}));await new Promise(r=>setTimeout(r,30))}if(!light.length)dataChannel.send(JSON.stringify({type:'timeline-sync',tweets:[],part:0,done:true}));for(const name of Object.keys(avatarMap)){const url=avatarMap[name];if(!url)continue;try{dataChannel.send(JSON.stringify({type:'avatar',name,dataUrl:url}))}catch{await new Promise(r=>setTimeout(r,50));try{dataChannel.send(JSON.stringify({type:'avatar',name,dataUrl:url}))}catch{}}}if(myBio)try{dataChannel.send(JSON.stringify({type:'bio',name:myName,bio:myBio}))}catch{}for(const t of tweets){const imgs=normalizeImages(t).filter(Boolean);for(let i=0;i<imgs.length;i++){try{const blob=await(await fetch(imgs[i])).blob();await sendMediaChunks(t.id,'img'+i,{blob,mime:blob.type||'image/jpeg',size:blob.size},'image')}catch(err){log('历史图失败: '+err.message)}}}try{dataChannel.send(JSON.stringify({type:'sync-done',count:tweets.length}))}catch{}log('历史已同步 '+tweets.length+' 条')}catch(e){log('历史同步失败: '+e.message)}historySyncing=false}
+function setupDataChannelEvents(){dataChannel.binaryType='arraybuffer';dataChannel.onopen=()=>{log('通道已连通');statusEl.textContent='已加入';peerStatus.textContent='在线';updateCharCount();cancelDisconnectTimer();startDataChannelKeepAlive();requestWakeLock();try{dataChannel.send(JSON.stringify({type:'hello',name:myName,avatar:myAvatarUrl,bio:myBio}))}catch{}if(role==='join'){try{dataChannel.send(JSON.stringify({type:'sync-request'}))}catch{}}else if(role==='host'){setTimeout(()=>{sendHistoryToPeer()},400)}};dataChannel.onclose=()=>{log('通道已关闭');peerStatus.textContent='离线';statusEl.textContent='断开';if(dcKeepAliveTimer){clearInterval(dcKeepAliveTimer);dcKeepAliveTimer=null}releaseWakeLock();scheduleDisconnect('通道关闭')};dataChannel.onmessage=e=>{if(e.data instanceof ArrayBuffer||e.data instanceof Blob||e.data instanceof Uint8Array){handleImageChunk(e.data);return}if(typeof e.data!=='string')return;try{const d=JSON.parse(e.data);if(d.type==='hb'||d.type==='ping')return;if(d.type==='sync-request'){if(role==='host')sendHistoryToPeer();return}if(d.type==='sync-done'){log('历史同步完成: '+(d.count||0)+' 条');renderTimeline();return}if(d.type==='hello'){peerName=d.name||'Peer';if(d.avatar){peerAvatarUrl=d.avatar;avatarMap[peerName]=d.avatar;if(role==='host')saveMeta('avatar:'+peerName,d.avatar)}if(d.bio!=null){peerBio=d.bio;if(role==='host')saveMeta('bio:'+peerName,d.bio)}log('对方: '+peerName);if(role==='host')setTimeout(()=>sendHistoryToPeer(),200);return}if(d.type==='bio'){if(d.name===myName){myBio=d.bio||'';setProfileUI()}else{peerBio=d.bio||''}if(role==='host')saveMeta('bio:'+d.name,d.bio||'');return}if(d.type==='avatar'){avatarMap[d.name]=d.dataUrl;if(d.name===peerName)peerAvatarUrl=d.dataUrl;if(role==='host')saveMeta('avatar:'+d.name,d.dataUrl);renderTimeline();setProfileUI();return}if(d.type==='timeline-sync'){(d.tweets||[]).forEach(t=>{const n=Math.min(t.imgCount||0,4);const imgs=Array.isArray(t.images)&&t.images.length?t.images.filter(Boolean):Array(n).fill(null);addTweet({id:t.id,author:t.author,handle:t.handle,text:t.text,images:imgs.length?imgs:Array(n).fill(null),imgCount:n||imgs.filter(Boolean).length,imageDataUrl:(imgs.find&&imgs.find(Boolean))||null,ts:t.ts,isLocal:false,isAdmin:!!t.isAdmin,likes:t.likes||[],favs:t.favs||[],replies:t.replies||[]},false)});renderTimeline();log('同步批次 '+(d.tweets||[]).length+' 条');return}if(d.type==='tweet'){const n=Math.min(d.imgCount||0,4);addTweet({id:d.id,author:d.author,handle:d.handle,text:d.text,images:Array(n).fill(null),imgCount:n,imageDataUrl:null,ts:d.ts,isLocal:false,isAdmin:!!d.isAdmin,likes:[],favs:[],replies:[]},true);return}if(d.type==='eng'){const t=tweets.find(x=>x.id===d.id);if(!t)return;ensureEng(t);if(d.action==='like'){const i=t.likes.indexOf(d.name);if(d.on&&i<0)t.likes.push(d.name);if(!d.on&&i>=0)t.likes.splice(i,1);patchEngButtons(d.id)}else if(d.action==='fav'){const i=t.favs.indexOf(d.name);if(d.on&&i<0)t.favs.push(d.name);if(!d.on&&i>=0)t.favs.splice(i,1);patchEngButtons(d.id)}else if(d.action==='reply'&&d.reply){if(!t.replies.some(r=>r.id===d.reply.id))t.replies.push(d.reply);renderTimeline()}if(role==='host')persistTweet(t);return}if(d.type==='tweet-delete'){const target=tweets.find(t=>t.id===d.id);if(role==='host'&&target&&target.author!==peerName){log('忽略无权删除');return}tweets=tweets.filter(t=>t.id!==d.id);renderTimeline();if(role==='host')deleteTweetFromDB(d.id);return}if(d.type==='media-meta'||d.type==='img-meta'){const mid=d.mid||d.tweetId;pendingImageChunks.set(mid,{chunks:[],received:0,total:d.totalChunks,mime:d.mime,tweetId:d.tweetId,mediaKey:d.mediaKey||'img0',kind:d.kind||'image'});return}}catch{}}}
+function handleImageChunk(raw){const process=buffer=>{const view=new Uint8Array(buffer);if(view.length<36)return;const mid=String.fromCharCode.apply(null,view.subarray(0,36));const data=view.subarray(36);const entry=pendingImageChunks.get(mid);if(!entry)return;entry.chunks.push(data);entry.received++;if(entry.received>=entry.total){const totalLen=entry.chunks.reduce((s,c)=>s+c.length,0);const result=new Uint8Array(totalLen);let offset=0;for(const c of entry.chunks){result.set(c,offset);offset+=c.length}const blob=new Blob([result],{type:entry.mime||'image/jpeg'});const reader=new FileReader();reader.onload=ev=>{const tweet=tweets.find(t=>t.id===entry.tweetId);if(tweet){const n=tweet.imgCount||4;if(!Array.isArray(tweet.images)||tweet.images.length<n){const old=tweet.images||[];tweet.images=Array.from({length:n},(_,i)=>old[i]||null)}const idx=parseInt(String(entry.mediaKey||'').replace(/\D/g,''),10)||0;if(idx>=0&&idx<n)tweet.images[idx]=ev.target.result;tweet.imageDataUrl=tweet.images.find(Boolean)||null;patchTweetMedia(tweet.id);if(role==='host')saveTweetToDB(tweet)}pendingImageChunks.delete(mid);log('图片接收完成')};reader.readAsDataURL(blob)}};if(raw instanceof Blob)raw.arrayBuffer().then(process).catch(()=>{});else if(raw instanceof ArrayBuffer)process(raw);else if(raw instanceof Uint8Array)process(raw.buffer)}
+function clearAllTimers(){if(keepAliveTimer){clearInterval(keepAliveTimer);keepAliveTimer=null}if(dcKeepAliveTimer){clearInterval(dcKeepAliveTimer);dcKeepAliveTimer=null}if(disconnectTimer){clearTimeout(disconnectTimer);disconnectTimer=null}if(bgInterval){clearInterval(bgInterval);bgInterval=null}}
+function startSignalingKeepAlive(){if(keepAliveTimer)clearInterval(keepAliveTimer);keepAliveTimer=setInterval(()=>{if(ws&&ws.readyState===1&&currentRoom)try{ws.send(JSON.stringify({type:'ping',room:currentRoom}))}catch{}},document.hidden?5000:12000)}
+function startDataChannelKeepAlive(){if(dcKeepAliveTimer)clearInterval(dcKeepAliveTimer);dcKeepAliveTimer=setInterval(()=>{if(dataChannel&&dataChannel.readyState==='open')try{dataChannel.send(JSON.stringify({type:'hb',t:Date.now()}))}catch{}},document.hidden?3000:8000)}
+function scheduleDisconnect(reason){if(disconnectTimer)return;log(reason+'，即将退出...');disconnectTimer=setTimeout(()=>{disconnectTimer=null;if(pc&&(pc.connectionState==='connected'||pc.connectionState==='connecting'))return;if(dataChannel&&dataChannel.readyState==='open')return;returnToWizard()},DISCONNECT_GRACE_MS)}
+function cancelDisconnectTimer(){if(disconnectTimer){clearTimeout(disconnectTimer);disconnectTimer=null}}
+function tryIceRestart(){if(!pc||typeof pc.restartIce!=='function')return;if(pc.connectionState!=='disconnected'&&pc.iceConnectionState!=='disconnected')return;try{pc.restartIce();log('ICE 重启')}catch(e){log('ICE 重启失败: '+e.message)}}
+async function requestWakeLock(){try{if('wakeLock' in navigator){wakeLock=await navigator.wakeLock.request('screen');wakeLock.addEventListener('release',()=>{wakeLock=null});log('WakeLock 已获取')}}catch{}}
+function releaseWakeLock(){if(wakeLock){try{wakeLock.release()}catch{}wakeLock=null}}
+function bindConnectionState(pcRef){pcRef.onconnectionstatechange=()=>{const st=pcRef.connectionState;log('连接状态: '+st);if(st==='connected'){cancelDisconnectTimer();statusEl.textContent='已加入';peerStatus.textContent='在线'}else if(st==='disconnected'){tryIceRestart();scheduleDisconnect('连接短暂断开')}else if(st==='failed'||st==='closed'){cancelDisconnectTimer();returnToWizard()}};pcRef.oniceconnectionstatechange=()=>{const st=pcRef.iceConnectionState;log('ICE: '+st);if(st==='connected'||st==='completed')cancelDisconnectTimer();else if(st==='disconnected'){tryIceRestart();scheduleDisconnect('ICE 短暂断开')}else if(st==='failed'||st==='closed'){cancelDisconnectTimer();returnToWizard()}}}
+function enterApp(){initModal.style.display='none';app.classList.add('visible');myName=(displayNameInput.value.trim()||(role==='host'?'Host':'Guest')).slice(0,20);setProfileUI();if(soloMode){statusEl.textContent='单人模式';peerStatus.textContent='单人'}else{statusEl.textContent='已加入'}updateCharCount();requestWakeLock()}
+async function enterSolo(){soloMode=true;role='host';myName=(displayNameInput.value.trim()||'Host').slice(0,20);tweets=await loadTweetsFromDB();const meta=await loadAllMeta();Object.keys(meta).forEach(k=>{if(k.startsWith('avatar:'))avatarMap[k.slice(7)]=meta[k]});if(avatarMap[myName])myAvatarUrl=avatarMap[myName];if(meta['bio:'+myName])myBio=meta['bio:'+myName];renderTimeline();setProfileUI();enterApp();log('已进入单人模式')}
+function returnToWizard(){if(returningToWizard)return;returningToWizard=true;clearAllTimers();releaseWakeLock();log('双方退出，返回向导');if(pc){try{pc.close()}catch{}pc=null}if(ws){try{ws.close()}catch{}ws=null}dataChannel=null;tweets=[];selectedImages=[];soloMode=false;renderComposePreview();composeText.value='';peerStatus.textContent='离线';statusEl.textContent='就绪';app.classList.remove('visible');initModal.style.display='flex';waitingArea.classList.add('step-hidden');sigConnectBtn.disabled=false;sigConnectBtn.textContent='连接信令并开始';modalHostSdp.value=modalJoinAnswer.value='';modalCopyJoin.disabled=modalFinishJoin.disabled=modalApplyAnswer.disabled=true;modalApplyOffer.disabled=true;offerHandled=false;currentRoom='';setTimeout(()=>{returningToWizard=false},500)}
+function resetPeer(){clearAllTimers();if(pc){pc.close();pc=null}if(ws){ws.close();ws=null}dataChannel=null;modalHostSdp.value=modalJoinAnswer.value='';modalCopyJoin.disabled=modalFinishJoin.disabled=modalApplyAnswer.disabled=true;modalApplyOffer.disabled=modalJoinOffer.value.trim().length<=10;currentRoom='';offerHandled=false;waitingArea.classList.add('step-hidden');sigConnectBtn.disabled=false;sigConnectBtn.textContent='连接信令并开始'}
+function updateModeUI(){const isSig=connMode.value==='signaling';signalingSection.classList.toggle('step-hidden',!isSig);manualSection.classList.toggle('step-hidden',isSig);updateRoleUI();resetPeer()}
+function updateRoleUI(){hostDataPanel.classList.toggle('step-hidden',role!=='host');if(connMode.value!=='signaling'){role==='host'?(modalHostSection.classList.remove('step-hidden'),modalJoinSection.classList.add('step-hidden')):(modalJoinSection.classList.remove('step-hidden'),modalHostSection.classList.add('step-hidden'));return}roomLabel.textContent=role==='host'?'自定义房间号（创建）':'输入对方的房间号（加入）';roomInput.placeholder=role==='host'?'例如 myroom01':'填写对方房间号';waitingArea.classList.add('step-hidden');sigConnectBtn.disabled=false;sigConnectBtn.textContent='连接信令并开始'}
+connMode.addEventListener('change',updateModeUI);signalingUrl.addEventListener('change',saveUrl);signalingUrl.addEventListener('blur',saveUrl);
+modalHostBtn.addEventListener('click',()=>{modalHostBtn.classList.add('active');modalJoinBtn.classList.remove('active');role='host';resetPeer();updateRoleUI();if(connMode.value==='manual'){modalHostSection.classList.remove('step-hidden');modalJoinSection.classList.add('step-hidden');initHostPeer()}});
+modalJoinBtn.addEventListener('click',()=>{modalJoinBtn.classList.add('active');modalHostBtn.classList.remove('active');role='join';resetPeer();updateRoleUI();if(connMode.value==='manual'){modalJoinSection.classList.remove('step-hidden');modalHostSection.classList.add('step-hidden');initJoinPeer()}});
+$('exportZipBtn').addEventListener('click',exportZip);
+$('soloEnterBtn').addEventListener('click',()=>{enterSolo()});
+$('clearDataBtn').addEventListener('click',()=>{if(confirm('确定清空 IndexedDB 中全部推文与头像？'))clearAllTweetsDB()});
+$('importZipBtn').addEventListener('click',()=>$('importZipInput').click());
+$('importZipInput').addEventListener('change',()=>{const f=$('importZipInput').files[0];if(f)importZip(f);$('importZipInput').value=''});
+async function initHostPeer(){pc=new RTCPeerConnection(ICE_SERVERS);bindConnectionState(pc);dataChannel=pc.createDataChannel('wx');setupDataChannelEvents();tweets=await loadTweetsFromDB();const meta=await loadAllMeta();Object.keys(meta).forEach(k=>{if(k.startsWith('avatar:'))avatarMap[k.slice(7)]=meta[k]});if(avatarMap[myName])myAvatarUrl=avatarMap[myName];if(meta['bio:'+myName])myBio=meta['bio:'+myName];renderTimeline();setProfileUI();let g=false;pc.onicecandidate=e=>{if(!e.candidate&&!g){g=true;modalHostSdp.value=JSON.stringify(pc.localDescription);log('Offer 就绪');if(ws&&ws.readyState===1)ws.send(JSON.stringify({type:'offer',room:currentRoom,sdp:pc.localDescription}))}};const o=await pc.createOffer();await pc.setLocalDescription(o);setTimeout(()=>{if(!modalHostSdp.value){modalHostSdp.value=JSON.stringify(pc.localDescription);log('Offer 就绪');if(ws&&ws.readyState===1)ws.send(JSON.stringify({type:'offer',room:currentRoom,sdp:pc.localDescription}))}},1200)}
+function initJoinPeer(){pc=new RTCPeerConnection(ICE_SERVERS);bindConnectionState(pc);pc.ondatachannel=e=>{dataChannel=e.channel;setupDataChannelEvents()}}
+modalCopyHost.addEventListener('click',()=>navigator.clipboard.writeText(modalHostSdp.value).then(()=>{modalCopyHost.textContent='已复制';setTimeout(()=>modalCopyHost.textContent='复制 Offer',2000)}));
+modalCopyJoin.addEventListener('click',()=>navigator.clipboard.writeText(modalJoinAnswer.value).then(()=>{modalCopyJoin.textContent='已复制';setTimeout(()=>modalCopyJoin.textContent='复制 Answer',2000)}));
+modalHostAnswer.addEventListener('input',()=>modalApplyAnswer.disabled=modalHostAnswer.value.trim().length<=10);
+modalJoinOffer.addEventListener('input',()=>modalApplyOffer.disabled=modalJoinOffer.value.trim().length<=10);
+modalApplyAnswer.addEventListener('click',async()=>{try{const a=JSON.parse(modalHostAnswer.value.trim());await pc.setRemoteDescription(new RTCSessionDescription(a));log('Answer 已应用');enterApp()}catch(e){alert('失败: '+e.message)}});
+modalApplyOffer.addEventListener('click',async()=>{try{if(!pc)initJoinPeer();const o=JSON.parse(modalJoinOffer.value.trim());await pc.setRemoteDescription(new RTCSessionDescription(o));const a=await pc.createAnswer();await pc.setLocalDescription(a);let g=false;pc.onicecandidate=e=>{if(!e.candidate&&!g){g=true;modalJoinAnswer.value=JSON.stringify(pc.localDescription);modalCopyJoin.disabled=modalFinishJoin.disabled=false;log('Answer 就绪');if(ws&&ws.readyState===1)ws.send(JSON.stringify({type:'answer',room:currentRoom,sdp:pc.localDescription}))}};setTimeout(()=>{if(!modalJoinAnswer.value){modalJoinAnswer.value=JSON.stringify(pc.localDescription);modalCopyJoin.disabled=modalFinishJoin.disabled=false;if(ws&&ws.readyState===1)ws.send(JSON.stringify({type:'answer',room:currentRoom,sdp:pc.localDescription}))}},1200)}catch(e){alert('失败: '+e.message)}});
+modalFinishJoin.addEventListener('click',()=>{enterApp();log('已进入')});
+sigConnectBtn.addEventListener('click',()=>{const url=signalingUrl.value.trim();if(!url.startsWith('ws://')&&!url.startsWith('wss://')){alert('请输入有效的 ws:// 或 wss:// 地址');return}saveUrl();const room=roomInput.value.trim();if(!room||room.length<2){alert('请输入房间号（至少2位）');return}resetPeer();currentRoom=room;offerHandled=false;sigConnectBtn.disabled=true;sigConnectBtn.textContent='连接中...';ws=new WebSocket(url);ws.onopen=()=>{log('信令已连接');startSignalingKeepAlive();if(role==='host'){ws.send(JSON.stringify({type:'create',room:currentRoom}));log('创建房间: '+currentRoom)}else{ws.send(JSON.stringify({type:'join',room:currentRoom}));log('加入房间: '+currentRoom);initJoinPeer()}};ws.onmessage=async e=>{try{const m=JSON.parse(e.data);if(m.type==='error'){alert(m.message||'信令错误');sigConnectBtn.disabled=false;sigConnectBtn.textContent='连接信令并开始';return}if(m.type==='room-created'){log('房间: '+m.room);waitingRoomCode.textContent=m.room;waitingArea.classList.remove('step-hidden');sigConnectBtn.textContent='等待对方加入...';await initHostPeer()}if(m.type==='joined')log('已加入: '+m.room);if(m.type==='offer'&&role==='join'&&!offerHandled){if(!pc)initJoinPeer();if(pc.signalingState!=='stable'){log('忽略重复 Offer');return}offerHandled=true;log('收到 Offer');await pc.setRemoteDescription(new RTCSessionDescription(m.sdp));const a=await pc.createAnswer();await pc.setLocalDescription(a);let g=false;pc.onicecandidate=ev=>{if(!ev.candidate&&!g){g=true;ws.send(JSON.stringify({type:'answer',room:currentRoom,sdp:pc.localDescription}));log('Answer 已发');enterApp()}};setTimeout(()=>{if(pc.localDescription){ws.send(JSON.stringify({type:'answer',room:currentRoom,sdp:pc.localDescription}));enterApp()}},1200)}else if(m.type==='answer'&&role==='host'){if(pc.signalingState!=='have-local-offer'){log('忽略 Answer');return}await pc.setRemoteDescription(new RTCSessionDescription(m.sdp));log('Answer 已收');enterApp()}else if(m.type==='candidate'&&pc){try{await pc.addIceCandidate(m.candidate)}catch{}}else if(m.type==='peer-left'){log('对方离开，双方退出');returnToWizard()}}catch(err){log('信令处理失败: '+err.message)}};ws.onerror=()=>{log('信令错误');sigConnectBtn.disabled=false;sigConnectBtn.textContent='连接信令并开始'};ws.onclose=()=>{log('信令关闭');if(keepAliveTimer){clearInterval(keepAliveTimer);keepAliveTimer=null}if(initModal.style.display!=='none'){sigConnectBtn.disabled=false;sigConnectBtn.textContent='连接信令并开始'}else{scheduleDisconnect('信令断开')}}});
+$('toggleLogBtn').addEventListener('click',()=>logBar.classList.toggle('show'));
+document.addEventListener('visibilitychange',async()=>{if(document.hidden){startDataChannelKeepAlive();startSignalingKeepAlive();if(bgInterval)clearInterval(bgInterval);bgInterval=setInterval(()=>{if(dataChannel&&dataChannel.readyState==='open')try{dataChannel.send(JSON.stringify({type:'hb',t:Date.now()}))}catch{};if(ws&&ws.readyState===1&&currentRoom)try{ws.send(JSON.stringify({type:'ping',room:currentRoom}))}catch{}},2000)}else{if(bgInterval){clearInterval(bgInterval);bgInterval=null}startDataChannelKeepAlive();startSignalingKeepAlive();if(dataChannel&&dataChannel.readyState==='open')try{dataChannel.send(JSON.stringify({type:'hb',t:Date.now()}))}catch{};if(ws&&ws.readyState===1&&currentRoom)try{ws.send(JSON.stringify({type:'ping',room:currentRoom}))}catch{};if(pc&&(pc.connectionState==='disconnected'||pc.iceConnectionState==='disconnected'))tryIceRestart();cancelDisconnectTimer();await requestWakeLock()}});
+loadSavedUrl();initJoinPeer();updateModeUI();
+</script>
+</body>
+</html>
