@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
-<title>WebRTC-Meeting</title>
+<title>WebRTC-Meeting-2026109</title>
 <style>
 :root{--discord-bg:#313338;--discord-sidebar:#2b2d31;--discord-panel:#111214;--discord-chat:#383a40;--discord-input:#383a40;--discord-text:#dbdee1;--discord-text-muted:#949ba4;--discord-accent:#5865f2;--discord-accent-hover:#4752c4;--discord-green:#23a55a;--discord-red:#f23f43;--discord-border:#1f2023}
 *{box-sizing:border-box}
@@ -228,13 +228,18 @@ let pc,dataChannel,ws,role='join',currentRoom='',micEnabled=false,soundEnabled=t
 let keepAliveTimer=null,dcKeepAliveTimer=null,disconnectTimer=null,iceRestartTimer=null;
 const ICE_SERVERS={iceServers:[{urls:'stun:stun.l.google.com:19302'},{urls:'stun:stun1.l.google.com:19302'}]};
 const STORAGE_KEY='webrtc_signaling_url';
+const DEFAULT_SIGNALING_URL='wss://wss.getlost.ovh';
+const PLAYER_ID='p'+Math.random().toString(36).slice(2,10);
+let pendingRemoteCandidates=[];
+let signalingRegistered=false;
+let hostOfferStarted=false;
 const CHUNK_SIZE=16*1024;
 const BUFFER_THRESHOLD=256*1024;
 const DISCONNECT_GRACE_MS=18000;
 const pendingFiles=new Map();
 const activeSends=new Map();
 function log(m){console.log(m);logEl.innerHTML+=`<div>[${new Date().toLocaleTimeString()}] ${m}</div>`;logEl.scrollTop=logEl.scrollHeight}
-function loadSavedUrl(){const s=localStorage.getItem(STORAGE_KEY);if(s)signalingUrl.value=s}
+function loadSavedUrl(){const s=localStorage.getItem(STORAGE_KEY);signalingUrl.value=s||DEFAULT_SIGNALING_URL}
 function saveUrl(){const u=signalingUrl.value.trim();if(u)localStorage.setItem(STORAGE_KEY,u)}
 function clearAllTimers(){
 if(keepAliveTimer){clearInterval(keepAliveTimer);keepAliveTimer=null}
@@ -243,12 +248,7 @@ if(disconnectTimer){clearTimeout(disconnectTimer);disconnectTimer=null}
 if(iceRestartTimer){clearTimeout(iceRestartTimer);iceRestartTimer=null}
 }
 function startSignalingKeepAlive(){
-if(keepAliveTimer)clearInterval(keepAliveTimer);
-keepAliveTimer=setInterval(()=>{
-if(ws&&ws.readyState===1&&currentRoom){
-try{ws.send(JSON.stringify({type:'ping',room:currentRoom}))}catch{}
-}
-},12000);
+if(keepAliveTimer){clearInterval(keepAliveTimer);keepAliveTimer=null}
 }
 function startDataChannelKeepAlive(){
 if(dcKeepAliveTimer)clearInterval(dcKeepAliveTimer);
@@ -377,6 +377,19 @@ modalApplyOffer.disabled=true;
 initModal.style.display='flex';
 setTimeout(()=>{returningToWizard=false},500);
 }
+function sendSignal(kind,payload,to){
+if(ws&&ws.readyState===1&&currentRoom)ws.send(JSON.stringify({kind,roomId:currentRoom,from:PLAYER_ID,to,payload}))
+}
+function bindIce(){
+if(!pc)return;
+pc.onicecandidate=e=>{if(e.candidate&&currentRoom)sendSignal('ice',e.candidate,pcRemoteId)}
+}
+let pcRemoteId='';
+function flushRemoteCandidates(){
+if(!pc||!pc.remoteDescription)return;
+const list=pendingRemoteCandidates.splice(0);
+for(const c of list)pc.addIceCandidate(c).catch(()=>{})
+}
 function resetPeer(){
 clearAllTimers();
 if(pc){pc.close();pc=null}
@@ -388,7 +401,11 @@ modalHostSdp.value=modalJoinAnswer.value='';
 modalCopyJoin.disabled=modalFinishJoin.disabled=modalApplyAnswer.disabled=true;
 modalApplyOffer.disabled=modalJoinOffer.value.trim().length<=10;
 currentRoom='';
+pcRemoteId='';
+pendingRemoteCandidates=[];
 offerHandled=false;
+hostOfferStarted=false;
+signalingRegistered=false;
 waitingArea.classList.add('step-hidden');
 sigConnectBtn.disabled=false;
 sigConnectBtn.textContent='连接信令并开始';
@@ -827,28 +844,22 @@ if(micTrack&&audioTransceiver)audioTransceiver.sender.replaceTrack(micTrack).cat
 if(camTrack&&videoTransceiver1)videoTransceiver1.sender.replaceTrack(camTrack).catch(()=>{});
 if(screenTrack&&videoTransceiver2)videoTransceiver2.sender.replaceTrack(screenTrack).catch(()=>{});
 }
-async function initHostPeer(){
-createHostPeerConnection();
+async function initHostPeer(to){
+if(pc&&hostOfferStarted)return;
+hostOfferStarted=true;
+pcRemoteId=to||pcRemoteId;
+if(!pc)createHostPeerConnection();
 dataChannel=pc.createDataChannel('chat');
 setupDataChannelEvents();
-let g=false;
-pc.onicecandidate=e=>{
-if(!e.candidate&&!g){
-g=true;
-modalHostSdp.value=JSON.stringify(pc.localDescription);
-log('Host Offer 收集完成');
-if(ws&&ws.readyState===1)ws.send(JSON.stringify({type:'offer',room:currentRoom,sdp:pc.localDescription}));
-}
-};
+bindIce();
 const o=await pc.createOffer();
 await pc.setLocalDescription(o);
-setTimeout(()=>{
-if(!modalHostSdp.value){
-modalHostSdp.value=JSON.stringify(pc.localDescription);
-log('Host Offer 已就绪');
-if(ws&&ws.readyState===1)ws.send(JSON.stringify({type:'offer',room:currentRoom,sdp:pc.localDescription}));
-}
-},1200);
+const desc=pc.localDescription;
+modalHostSdp.value=JSON.stringify(desc);
+log('Offer 已生成，发送给 '+pcRemoteId);
+if(pcRemoteId)sendSignal('desc',desc,pcRemoteId);
+initModal.style.display='none';
+statusEl.textContent='等待 P2P 连接';
 }
 modalApplyAnswer.addEventListener('click',async()=>{
 try{
@@ -859,34 +870,23 @@ initModal.style.display='none';
 }catch(e){alert('应用 Answer 失败: '+e.message)}
 });
 function initJoinPeer(){
-createJoinPeerConnection();
+if(!pc)createJoinPeerConnection();
+bindIce();
 }
 modalApplyOffer.addEventListener('click',async()=>{
 try{
 if(!pc)createJoinPeerConnection();
 const o=JSON.parse(modalJoinOffer.value.trim());
+pcRemoteId='';
 await pc.setRemoteDescription(new RTCSessionDescription(o));
+flushRemoteCandidates();
 bindJoinTransceivers();
 const a=await pc.createAnswer();
 await pc.setLocalDescription(a);
-let g=false;
-pc.onicecandidate=e=>{
-if(!e.candidate&&!g){
-g=true;
 modalJoinAnswer.value=JSON.stringify(pc.localDescription);
 modalCopyJoin.disabled=modalFinishJoin.disabled=false;
-log('Answer 收集完成，可复制发回');
-if(ws&&ws.readyState===1)ws.send(JSON.stringify({type:'answer',room:currentRoom,sdp:pc.localDescription}));
-}
-};
-setTimeout(()=>{
-if(!modalJoinAnswer.value){
-modalJoinAnswer.value=JSON.stringify(pc.localDescription);
-modalCopyJoin.disabled=modalFinishJoin.disabled=false;
-log('Answer 已就绪');
-if(ws&&ws.readyState===1)ws.send(JSON.stringify({type:'answer',room:currentRoom,sdp:pc.localDescription}));
-}
-},1200);
+if(ws&&ws.readyState===1&&currentRoom&&pcRemoteId)sendSignal('desc',pc.localDescription,pcRemoteId);
+log('Answer 已生成');
 }catch(e){alert('解析 Offer 失败: '+e.message)}
 });
 modalFinishJoin.addEventListener('click',()=>{
@@ -894,116 +894,92 @@ initModal.style.display='none';
 log('已确认连通，进入会议');
 });
 sigConnectBtn.addEventListener('click',()=>{
-const url=signalingUrl.value.trim();
-if(!url.startsWith('ws://')&&!url.startsWith('wss://')){
-alert('请输入有效的 ws:// 或 wss:// 地址');
-return;
-}
+const url=signalingUrl.value.trim()||DEFAULT_SIGNALING_URL;
+if(!url.startsWith('ws://')&&!url.startsWith('wss://')){alert('请输入有效的 ws:// 或 wss:// 地址');return}
+signalingUrl.value=url;
 saveUrl();
 const room=roomInput.value.trim();
-if(!room||room.length<2){
-alert('请输入房间号（至少2位）');
-return;
-}
+if(!room||room.length<2){alert('请输入房间号（至少2位）');return}
 resetPeer();
 currentRoom=room;
-offerHandled=false;
 sigConnectBtn.disabled=true;
 sigConnectBtn.textContent='连接中...';
 ws=new WebSocket(url);
 ws.onopen=()=>{
-log('信令服务器已连接');
-startSignalingKeepAlive();
-if(role==='host'){
-ws.send(JSON.stringify({type:'create',room:currentRoom}));
-log('正在创建房间: '+currentRoom);
-}else{
-ws.send(JSON.stringify({type:'join',room:currentRoom}));
-log('正在加入房间: '+currentRoom);
-initJoinPeer();
-}
+log('信令服务器已连接: '+url);
+signalingRegistered=true;
+ws.send(JSON.stringify({kind:'register',roomId:currentRoom,from:PLAYER_ID,announce:true}));
+log('已注册房间 '+currentRoom+'，玩家ID: '+PLAYER_ID);
+if(role==='join')initJoinPeer();
 };
 ws.onmessage=async e=>{
 try{
 const m=JSON.parse(e.data);
-if(m.type==='error'){
-alert(m.message||'信令错误');
-sigConnectBtn.disabled=false;
-sigConnectBtn.textContent='连接信令并开始';
-return;
-}
-if(m.type==='room-created'){
-log('房间创建成功: '+m.room);
-waitingRoomCode.textContent=m.room;
+if(m.sys==='error'||m.type==='error'){log('信令错误: '+(m.message||m.code||'未知错误'));sigConnectBtn.disabled=false;sigConnectBtn.textContent='连接信令并开始';return}
+if(m.sys==='roster'){
+const roster=Array.isArray(m.roster)?m.roster:[];
+log('房间玩家: '+roster.join(', '));
+const others=roster.filter(id=>id!==PLAYER_ID);
+if(!others.length){
+waitingRoomCode.textContent=currentRoom;
 waitingArea.classList.remove('step-hidden');
 sigConnectBtn.textContent='等待对方加入中...';
-initHostPeer();
+return
 }
-if(m.type==='joined'){
-log('成功加入房间: '+m.room);
+waitingArea.classList.add('step-hidden');
+const target=others[0];
+pcRemoteId=target;
+if(role==='host'&&!hostOfferStarted)await initHostPeer(target);
+return
 }
-if(m.type==='offer'&&role==='join'&&!offerHandled){
+if(m.kind==='desc'){
+const from=m.from;
+if(from===PLAYER_ID)return;
+pcRemoteId=from;
 if(!pc)createJoinPeerConnection();
-if(pc.signalingState!=='stable'){
-log('忽略重复 Offer，当前状态: '+pc.signalingState);
-return;
-}
+const desc=m.payload;
+if(desc.type==='offer'&&role==='join'){
+if(pc.signalingState!=='stable'){log('忽略重复 Offer');return}
 offerHandled=true;
-log('收到 Offer，开始生成 Answer');
-await pc.setRemoteDescription(new RTCSessionDescription(m.sdp));
+await pc.setRemoteDescription(new RTCSessionDescription(desc));
+flushRemoteCandidates();
 bindJoinTransceivers();
-const a=await pc.createAnswer();
-await pc.setLocalDescription(a);
-let g=false;
-pc.onicecandidate=ev=>{
-if(!ev.candidate&&!g){
-g=true;
-ws.send(JSON.stringify({type:'answer',room:currentRoom,sdp:pc.localDescription}));
-log('Answer 已通过信令发送');
+const answer=await pc.createAnswer();
+await pc.setLocalDescription(answer);
+sendSignal('desc',pc.localDescription,from);
+modalJoinAnswer.value=JSON.stringify(pc.localDescription);
+modalCopyJoin.disabled=modalFinishJoin.disabled=false;
 initModal.style.display='none';
 statusEl.textContent='通话中';
-}
-};
-setTimeout(()=>{
-if(pc.localDescription){
-ws.send(JSON.stringify({type:'answer',room:currentRoom,sdp:pc.localDescription}));
+log('收到 Offer，Answer 已发送');
+}else if(desc.type==='answer'&&role==='host'){
+if(pc.signalingState!=='have-local-offer'){log('忽略 Answer，当前状态: '+pc.signalingState);return}
+await pc.setRemoteDescription(new RTCSessionDescription(desc));
+flushRemoteCandidates();
 initModal.style.display='none';
 statusEl.textContent='通话中';
+log('收到 Answer，P2P 正在建立');
 }
-},1200);
-}else if(m.type==='answer'&&role==='host'){
-if(pc.signalingState!=='have-local-offer'){
-log('忽略 Answer，当前状态: '+pc.signalingState);
-return;
+return
 }
-await pc.setRemoteDescription(new RTCSessionDescription(m.sdp));
-log('Answer 已通过信令接收，对方已加入，进入会议');
-initModal.style.display='none';
-statusEl.textContent='通话中';
-}else if(m.type==='candidate'&&pc){
-try{await pc.addIceCandidate(m.candidate)}catch{}
-}else if(m.type==='peer-left'){
-log('对方已离开房间');
-returnToWizard();
+if(m.kind==='ice'){
+if(m.from===PLAYER_ID)return;
+if(m.from)pcRemoteId=m.from;
+const c=m.payload;
+if(!pc||!pc.remoteDescription)pendingRemoteCandidates.push(c);
+else pc.addIceCandidate(c).catch(()=>{});
+return
 }
 }catch(err){log('信令消息处理失败: '+err.message)}
 };
-ws.onerror=()=>{
-log('信令连接错误');
-sigConnectBtn.disabled=false;
-sigConnectBtn.textContent='连接信令并开始';
-};
+ws.onerror=()=>{log('信令连接错误');sigConnectBtn.disabled=false;sigConnectBtn.textContent='连接信令并开始'};
 ws.onclose=()=>{
 log('信令连接已关闭');
 if(keepAliveTimer){clearInterval(keepAliveTimer);keepAliveTimer=null}
-if(initModal.style.display!=='none'){
-sigConnectBtn.disabled=false;
-sigConnectBtn.textContent='连接信令并开始';
-}else{
-scheduleDisconnect('信令断开');
-}
+if(initModal.style.display!=='none'){sigConnectBtn.disabled=false;sigConnectBtn.textContent='连接信令并开始'}else scheduleDisconnect('信令断开');
 };
 });
+
 document.addEventListener('visibilitychange',()=>{
 if(document.hidden){
 log('页面进入后台');
@@ -1013,7 +989,7 @@ if(dataChannel&&dataChannel.readyState==='open'){
 try{dataChannel.send(JSON.stringify({type:'hb',t:Date.now()}))}catch{}
 }
 if(ws&&ws.readyState===1&&currentRoom){
-try{ws.send(JSON.stringify({type:'ping',room:currentRoom}))}catch{}
+
 }
 if(pc&&(pc.connectionState==='disconnected'||pc.iceConnectionState==='disconnected')){
 tryIceRestart();
@@ -1026,7 +1002,7 @@ if(dataChannel&&dataChannel.readyState==='open'){
 try{dataChannel.send(JSON.stringify({type:'hb',t:Date.now()}))}catch{}
 }
 if(ws&&ws.readyState===1&&currentRoom){
-try{ws.send(JSON.stringify({type:'ping',room:currentRoom}))}catch{}
+
 }
 });
 loadSavedUrl();
