@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
-<title>WebRTC-Meeting-2026109</title>
+<title>WebRTC Meeting · 2026-10-09-14</title>
 <style>
 :root{--discord-bg:#313338;--discord-sidebar:#2b2d31;--discord-panel:#111214;--discord-chat:#383a40;--discord-input:#383a40;--discord-text:#dbdee1;--discord-text-muted:#949ba4;--discord-accent:#5865f2;--discord-accent-hover:#4752c4;--discord-green:#23a55a;--discord-red:#f23f43;--discord-border:#1f2023}
 *{box-sizing:border-box}
@@ -238,6 +238,7 @@ const BUFFER_THRESHOLD=256*1024;
 const DISCONNECT_GRACE_MS=18000;
 const pendingFiles=new Map();
 const activeSends=new Map();
+const sendReadyWaiters=new Map();
 function log(m){console.log(m);logEl.innerHTML+=`<div>[${new Date().toLocaleTimeString()}] ${m}</div>`;logEl.scrollTop=logEl.scrollHeight}
 function loadSavedUrl(){const s=localStorage.getItem(STORAGE_KEY);signalingUrl.value=s||DEFAULT_SIGNALING_URL}
 function saveUrl(){const u=signalingUrl.value.trim();if(u)localStorage.setItem(STORAGE_KEY,u)}
@@ -576,49 +577,66 @@ return{el:wrap,progressBar:wrap.querySelector('.progress-bar'),statusText:wrap.q
 function handleFileMeta(meta){
 const id=meta.id;
 const ui=createFileMsgEl(meta,false);
-pendingFiles.set(id,{meta,chunks:[],received:0,total:meta.totalChunks,ui});
-ui.statusText.textContent=`接收中 0%`;
-log(`开始接收文件: ${meta.name} (${formatSize(meta.size)})`);
+const saveBtn=document.createElement('button');
+saveBtn.className='download-btn';
+saveBtn.textContent='选择保存位置并接收';
+ui.statusText.textContent='等待接收方选择保存位置...';
+ui.statusText.appendChild(document.createTextNode(' '));
+ui.statusText.appendChild(saveBtn);
+const entry={meta,received:0,total:meta.totalChunks,ui,writable:null,writeQueue:Promise.resolve(),finished:false};
+pendingFiles.set(id,entry);
+saveBtn.onclick=async()=>{
+if(!window.showSaveFilePicker){ui.statusText.textContent='当前浏览器不支持大文件流式保存，请使用最新版 Chrome/Edge 桌面版，并通过 localhost 或 HTTPS 打开。';return}
+saveBtn.disabled=true;
+try{
+const handle=await window.showSaveFilePicker({suggestedName:meta.name});
+entry.writable=await handle.createWritable();
+ui.statusText.textContent='已选择保存位置，等待数据...';
+dataChannel.send(JSON.stringify({type:'file-ready',id}));
+log(`准备接收文件: ${meta.name} (${formatSize(meta.size)})`);
+}catch(e){saveBtn.disabled=false;ui.statusText.textContent='已取消选择保存位置';log('选择保存位置失败: '+e.message)}
+};
 }
 function processChunkData(id,data){
 const entry=pendingFiles.get(id);
-if(!entry)return;
-entry.chunks.push(data);
+if(!entry||!entry.writable||entry.finished)return;
+const chunk=new Uint8Array(data);
+entry.writeQueue=entry.writeQueue.then(()=>entry.writable.write(chunk)).then(()=>{
 entry.received++;
 const pct=Math.min(100,Math.round(entry.received/entry.total*100));
 entry.ui.progressBar.style.width=pct+'%';
 entry.ui.statusText.textContent=`接收中 ${pct}% (${entry.received}/${entry.total})`;
-if(entry.received>=entry.total)finishReceiveFile(id);
+if(entry.received>=entry.total){entry.finished=true;entry.writeQueue.then(async()=>{try{await entry.writable.close();entry.ui.progressBar.style.width='100%';entry.ui.statusText.textContent='接收完成，文件已直接写入所选位置。';log(`文件接收完成: ${entry.meta.name}`)}catch(e){entry.ui.statusText.textContent='保存失败: '+e.message;log('完成文件保存失败: '+e.message)}pendingFiles.delete(id)});}
+}).catch(async err=>{
+entry.ui.statusText.textContent='写入失败: '+err.message;
+log('文件写入失败: '+err.message);
+try{await entry.writable?.abort()}catch{}
+entry.finished=true;
+});
 }
 function handleFileChunk(raw){
 const process=buffer=>{
 const view=new Uint8Array(buffer);
 if(view.length<36)return;
 const id=String.fromCharCode.apply(null,view.subarray(0,36));
-const data=view.subarray(36);
+const data=view.slice(36);
 processChunkData(id,data);
 };
-if(raw instanceof Blob){
-raw.arrayBuffer().then(process).catch(err=>log('文件分片解析失败: '+err.message));
-}else if(raw instanceof ArrayBuffer){
-process(raw);
-}else if(raw instanceof Uint8Array){
-process(raw.buffer);
+if(raw instanceof Blob){raw.arrayBuffer().then(process).catch(err=>log('文件分片解析失败: '+err.message));}
+else if(raw instanceof ArrayBuffer){process(raw);}
+else if(raw instanceof Uint8Array){process(raw.buffer.slice(raw.byteOffset,raw.byteOffset+raw.byteLength));}
 }
-}
-function finishReceiveFile(id){
+async function finishReceiveFile(id){
 const entry=pendingFiles.get(id);
-if(!entry)return;
-const{meta,chunks,ui}=entry;
-const totalLen=chunks.reduce((s,c)=>s+c.length,0);
-const result=new Uint8Array(totalLen);
-let offset=0;
-for(const c of chunks){result.set(c,offset);offset+=c.length}
-const blob=new Blob([result],{type:meta.mime||'application/octet-stream'});
-const url=URL.createObjectURL(blob);
-ui.progressBar.style.width='100%';
-ui.statusText.innerHTML=`接收完成 · <a class="download-btn" href="${url}" download="${meta.name}">下载文件</a>`;
-log(`文件接收完成: ${meta.name}`);
+if(!entry||entry.finished)return;
+entry.finished=true;
+try{
+await entry.writeQueue;
+await entry.writable.close();
+entry.ui.progressBar.style.width='100%';
+entry.ui.statusText.textContent='接收完成，文件已直接写入所选位置。';
+log(`文件接收完成: ${entry.meta.name}`);
+}catch(e){entry.ui.statusText.textContent='保存失败: '+e.message;log('完成文件保存失败: '+e.message)}
 pendingFiles.delete(id);
 }
 function cancelReceiveFile(id){
@@ -626,71 +644,70 @@ const entry=pendingFiles.get(id);
 if(!entry)return;
 entry.ui.progressBar.style.width='0%';
 entry.ui.statusText.textContent='对方已取消发送';
+entry.finished=true;
+try{entry.writable?.abort()}catch{}
 pendingFiles.delete(id);
 log(`文件接收已取消: ${entry.meta.name}`);
 }
 async function sendFile(file){
 if(!dataChannel||dataChannel.readyState!=='open'){alert('聊天通道未就绪');return}
+if(file.size>Number.MAX_SAFE_INTEGER){alert('文件过大');return}
 const id=crypto.randomUUID();
 const totalChunks=Math.ceil(file.size/CHUNK_SIZE)||1;
 const meta={type:'file-meta',id,name:file.name,size:file.size,mime:file.type||'application/octet-stream',totalChunks};
-dataChannel.send(JSON.stringify(meta));
 const ui=createFileMsgEl(meta,true);
-ui.statusText.textContent='发送中 0%';
+ui.statusText.textContent='等待接收方选择保存位置...';
 const cancelBtn=document.createElement('button');
 cancelBtn.className='cancel-btn';
 cancelBtn.textContent='取消';
 ui.statusText.parentNode.appendChild(cancelBtn);
-let cancelled=false;
-activeSends.set(id,{cancelled:false});
+const sendState={cancelled:false};
+activeSends.set(id,sendState);
+let readyResolve;
+const readyPromise=new Promise(resolve=>{readyResolve=resolve});
+sendReadyWaiters.set(id,readyResolve);
 cancelBtn.onclick=()=>{
-cancelled=true;
-activeSends.get(id).cancelled=true;
-dataChannel.send(JSON.stringify({type:'file-cancel',id}));
-ui.progressBar.style.width='0%';
-ui.statusText.textContent='已取消';
-cancelBtn.remove();
+sendState.cancelled=true;
+try{dataChannel.send(JSON.stringify({type:'file-cancel',id}))}catch{}
+const resolve=sendReadyWaiters.get(id);if(resolve)resolve(false);
+sendReadyWaiters.delete(id);
+ui.progressBar.style.width='0%';ui.statusText.textContent='已取消';cancelBtn.remove();
 log(`文件发送已取消: ${file.name}`);
 activeSends.delete(id);
 };
+dataChannel.send(JSON.stringify(meta));
+const ready=await readyPromise;
+sendReadyWaiters.delete(id);
+if(!ready||sendState.cancelled){activeSends.delete(id);return}
+ui.statusText.textContent='发送中 0%';
 dataChannel.bufferedAmountLowThreshold=BUFFER_THRESHOLD;
-const buffer=await file.arrayBuffer();
-const u8=new Uint8Array(buffer);
 let sent=0;
 for(let i=0;i<totalChunks;i++){
-if(cancelled||(activeSends.get(id)&&activeSends.get(id).cancelled))break;
+if(sendState.cancelled||!dataChannel||dataChannel.readyState!=='open')break;
 while(dataChannel.bufferedAmount>BUFFER_THRESHOLD){
-if(cancelled||(activeSends.get(id)&&activeSends.get(id).cancelled))break;
+if(sendState.cancelled||dataChannel.readyState!=='open')break;
 await new Promise(resolve=>{
 const handler=()=>{dataChannel.removeEventListener('bufferedamountlow',handler);resolve()};
 dataChannel.addEventListener('bufferedamountlow',handler);
+if(dataChannel.bufferedAmount<=BUFFER_THRESHOLD){dataChannel.removeEventListener('bufferedamountlow',handler);resolve()}
 });
 }
-if(cancelled||(activeSends.get(id)&&activeSends.get(id).cancelled))break;
+if(sendState.cancelled||dataChannel.readyState!=='open')break;
 const start=i*CHUNK_SIZE;
-const end=Math.min(start+CHUNK_SIZE,u8.length);
-const chunkData=u8.subarray(start,end);
+const end=Math.min(start+CHUNK_SIZE,file.size);
+const chunkData=new Uint8Array(await file.slice(start,end).arrayBuffer());
 const packet=new Uint8Array(36+chunkData.length);
 for(let j=0;j<36;j++)packet[j]=id.charCodeAt(j);
 packet.set(chunkData,36);
-try{dataChannel.send(packet)}catch(e){
-log('发送分片失败: '+e.message);
-ui.statusText.textContent='发送失败';
-cancelBtn.remove();
-activeSends.delete(id);
-return;
-}
+try{dataChannel.send(packet)}catch(e){log('发送分片失败: '+e.message);ui.statusText.textContent='发送失败: '+e.message;cancelBtn.remove();activeSends.delete(id);return}
 sent++;
 const pct=Math.round(sent/totalChunks*100);
 ui.progressBar.style.width=pct+'%';
 ui.statusText.textContent=`发送中 ${pct}% (${sent}/${totalChunks})`;
 }
-if(!cancelled&&!(activeSends.get(id)&&activeSends.get(id).cancelled)){
-ui.progressBar.style.width='100%';
-ui.statusText.textContent='发送完成';
+if(!sendState.cancelled&&sent===totalChunks){ui.progressBar.style.width='100%';ui.statusText.textContent='发送完成';log(`文件发送完成: ${file.name}`)}
+else if(!sendState.cancelled){ui.statusText.textContent='发送中断'}
 cancelBtn.remove();
-log(`文件发送完成: ${file.name}`);
-}
 activeSends.delete(id);
 }
 fileBtn.addEventListener('click',()=>{if(!fileBtn.disabled)fileInput.click()});
@@ -725,6 +742,7 @@ else if(d.target==='screen')d.enabled?remoteScreenOverlay.classList.add('hidden'
 return;
 }
 if(d.type==='file-meta'){handleFileMeta(d);return}
+if(d.type==='file-ready'){const resolve=sendReadyWaiters.get(d.id);if(resolve)resolve(true);return}
 if(d.type==='file-cancel'){cancelReceiveFile(d.id);return}
 }catch{}
 appendMessage(e.data,'remote');
